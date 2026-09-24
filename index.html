@@ -10,8 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
-  <script type="module" src="app.mjs"></script>
+  <link rel="stylesheet" href="styles.css?v=2">
+  <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
+  <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
+  <script type="module" src="app.mjs?v=2"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -43,7 +45,7 @@
 
       <section class="work-section" aria-labelledby="tasks-title">
         <div class="section-heading"><div><h2 id="tasks-title">Work recorded</h2><p id="task-count" class="muted small">Add a task as you go.</p></div><button id="add-task" class="button primary" type="button">+ Add task</button></div>
-        <div class="quick-tasks" aria-label="Quick task types"><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button><button data-quick="Custom task">Custom</button></div>
+        <div class="quick-tasks" aria-label="Quick task types"><button id="add-ticket">+ Ticket</button><button id="add-general">+ General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div>
         <div id="task-list"></div>
       </section>
 
@@ -57,10 +59,12 @@
     </section>
 
     <section id="report-panel" aria-label="Report" hidden>
-      <div class="section-heading"><div><h2>Ready for your supervisor</h2><p class="muted small">Review the details, then copy and paste into Teams.</p></div></div>
+      <div class="section-heading"><div><h2>Ready for your supervisor</h2><p class="muted small">Review your report, then choose how to share it.</p></div></div>
       <div id="report-checks" class="notice" hidden></div>
-      <div class="copy-actions"><button id="copy-rich" class="button primary">Copy for Teams</button><button id="copy-plain" class="button secondary">Copy plain text</button></div>
-      <p class="muted small copy-note">Formatted copy includes tables. Check the result in Teams before sending.</p>
+      <div class="share-card"><strong>Keep the tables in Teams</strong><p class="small muted">Share or attach the PDF to preserve this layout. Teams may remove tables or line breaks when pasting a message.</p><div class="copy-actions"><button id="share-pdf" class="button primary" hidden>Share PDF</button><button id="download-pdf" class="button primary">Download PDF</button></div></div>
+      <div class="copy-actions"><button id="copy-rich" class="button secondary">Copy formatted</button><button id="copy-plain" class="button secondary">Copy readable text</button></div>
+      <p class="muted small copy-note">Formatted copy provides tables; readable text uses numbered entries and separate lines. Check the paste in Teams before sending.</p>
+      <p id="share-status" class="notice" role="status" hidden></p>
       <div id="report-preview" class="report-paper"></div>
       <div id="manual-copy" class="notice" hidden><label>Copy this report<textarea id="manual-text" rows="10" readonly></textarea></label><p class="small">Automatic copying isn’t available here. Select and copy the text above.</p></div>
     </section>
@@ -82,14 +86,20 @@
       <header class="dialog-header"><div><p class="eyebrow">Work entry</p><h2 id="dialog-title">Add a task</h2></div><button id="close-task" type="button" class="icon-button" aria-label="Close task editor">×</button></header>
       <div class="dialog-body">
         <div id="task-error" class="notice danger" role="alert" hidden></div>
+        <fieldset class="segmented entry-types"><legend class="sr-only">Work entry type</legend><label><input type="radio" name="entry-type" value="field" checked><span>Row / field work</span></label><label><input type="radio" name="entry-type" value="ticket"><span>Ticket</span></label><label><input type="radio" name="entry-type" value="general"><span>General work</span></label></fieldset>
         <div class="fields two">
-          <label>Task type<select id="task-kind"></select></label><label>Status<select id="task-status"></select></label>
+          <label class="full">Work title <span id="title-optional" class="optional">optional</span><input id="task-title" placeholder="Short summary of the work" maxlength="200"></label>
+          <label id="kind-label">Field work type<select id="task-kind"></select></label><label>Status<select id="task-status"></select></label>
           <label id="custom-label" class="full" hidden>Custom task name<input id="task-custom" placeholder="Describe the type of work" maxlength="160"></label>
-          <label>Row / work area<input id="task-area" placeholder="Row or A-end" maxlength="200" required></label><label>Z-end <span class="optional">optional</span><input id="task-zend" placeholder="Connection endpoint" maxlength="200"></label>
-          <label>Quantity <span class="optional">optional</span><input id="task-quantity" type="number" min="0" max="10000000" step="1" inputmode="numeric" placeholder="Enter count"></label><label>Unit<select id="task-unit"></select></label>
+          <label>Ticket number <span class="optional">optional</span><input id="task-ticket" placeholder="INC, REQ, or work order number" maxlength="160"></label>
+          <label class="full">Description / request <span class="optional">optional</span><textarea id="task-description" rows="3" placeholder="What does the ticket or task ask for?" maxlength="12000"></textarea></label>
+          <label class="full">Work performed / progress <span class="optional">optional</span><textarea id="task-notes" rows="3" placeholder="What you did, the result, and what remains" maxlength="12000"></textarea></label>
         </div>
+        <details id="location-details" class="work-extras"><summary>Location &amp; quantities <span class="muted small">optional</span></summary><div class="fields two">
+          <label>Row / work area<input id="task-area" placeholder="Row, rack, or A-end" maxlength="200"></label><label>Z-end <span class="optional">optional</span><input id="task-zend" placeholder="Connection endpoint" maxlength="200"></label>
+          <label>Quantity <span class="optional">optional</span><input id="task-quantity" type="number" min="0" max="10000000" step="1" inputmode="numeric" placeholder="Enter count"></label><label>Unit<select id="task-unit"></select></label>
+        </div></details>
         <details id="breakdown-details" class="breakdown-details"><summary>Cable length breakdown <span class="muted small">optional</span></summary><p class="muted small">Record groups by cable length. This describes the work above; it isn’t added to the task quantity.</p><div id="breakdown-list"></div><button id="add-breakdown" type="button" class="button secondary">+ Add length</button></details>
-        <label class="notes-label">Work details <span class="optional">optional</span><textarea id="task-notes" rows="3" placeholder="Completed scope, remaining work, or actual test result" maxlength="12000"></textarea></label>
       </div>
       <footer class="dialog-footer"><button id="cancel-task" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save task</button></footer>
     </form>

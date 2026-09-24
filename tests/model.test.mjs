@@ -1,6 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newState, ensureDay, nextTask, renderReport, exportBackup, parseBackup, mergeBackup } from '../model.mjs';
+import { newState, ensureDay, nextTask, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask } from '../model.mjs';
+
+test('ticket descriptions survive saving and a row is not required for a complete report', () => {
+  const state = newState();
+  const day = ensureDay(state, '2026-09-24');
+  day.header = { start: '06:00', end: '16:00', location: 'Test site', supervisor: 'Test supervisor', lead: '', crew: 'Test crew' };
+  day.blockerState = 'None';
+  day.tasks = [validateTask({ ...nextTask(), entryType: 'ticket', title: 'Investigate link alarms', ticketId: 'INC-204', description: 'Intermittent link alarms reported', notes: 'Checked patching and confirmed stable link', area: '', status: 'Completed' })];
+  const restored = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(restored.tasks[0].ticketId, 'INC-204');
+  assert.equal(restored.tasks[0].description, 'Intermittent link alarms reported');
+  assert.equal(restored.tasks[0].notes, 'Checked patching and confirmed stable link');
+  assert.deepEqual(reportWarnings(restored), []);
+  const next = nextTask(restored.tasks[0]);
+  assert.equal(next.entryType, 'ticket');
+  assert.equal(next.ticketId, '');
+  assert.equal(next.description, '');
+  assert.equal(next.title, '');
+  const legacy = JSON.parse(exportBackup(state));
+  legacy.schema = 1;
+  delete legacy.days[day.date].tasks[0].entryType;
+  delete legacy.days[day.date].tasks[0].ticketId;
+  delete legacy.days[day.date].tasks[0].title;
+  delete legacy.days[day.date].tasks[0].description;
+  assert.equal(parseBackup(JSON.stringify(legacy)).days[day.date].tasks[0].notes, 'Checked patching and confirmed stable link');
+});
+
+test('readable report output keeps ticket identity, request, and work performed in separate lines', () => {
+  const day = ensureDay(newState(), '2026-09-24');
+  day.tasks = [{ ...nextTask(), entryType: 'ticket', title: 'Inspect cross-connect', ticketId: 'REQ-008', description: 'Check the new connection', notes: 'Inspected and labeled both ends', status: 'Completed' }];
+  const report = renderReport(day);
+  assert.match(report.text, /1\. Inspect cross-connect/);
+  assert.match(report.text, /\nTicket: REQ-008\n/);
+  assert.match(report.text, /\nDescription: Check the new connection\n/);
+  assert.match(report.text, /\nWork performed: Inspected and labeled both ends\n/);
+  assert.match(report.text, /\nStatus: Completed/);
+  assert.doesNotMatch(report.text, /Quantity not recorded|Location: Not recorded.*Inspect/);
+});
 
 test('a new day and next row retain reusable choices without carrying work totals', () => {
   const state = newState();

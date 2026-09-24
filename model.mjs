@@ -2,6 +2,7 @@ export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
 export const UNITS = ['bundles', 'fibers', 'cables', 'connections', 'items'];
 export const STATUSES = ['In progress', 'Completed', 'Blocked'];
+export const ENTRY_TYPES = ['field', 'ticket', 'general'];
 const HEADER_KEYS = ['location', 'supervisor', 'lead', 'crew', 'start', 'end'];
 export const blankHeader = () => Object.fromEntries(HEADER_KEYS.map(key => [key, '']));
 export function localDate(date = new Date()) {
@@ -12,7 +13,7 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 1, defaults: blankHeader(), days: {} }; }
+export function newState() { return { schema: 2, defaults: blankHeader(), days: {} }; }
 export function ensureDay(state, date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!Object.hasOwn(state.days, date)) state.days[date] = {
@@ -21,21 +22,22 @@ export function ensureDay(state, date) {
   return state.days[date];
 }
 export function nextTask(previous = {}) {
-  return { id: crypto.randomUUID(), kind: KINDS.includes(previous.kind) ? previous.kind : KINDS[0], custom: previous.custom || '', area: '', zEnd: '', quantity: '', unit: UNITS.includes(previous.unit) ? previous.unit : 'bundles', status: 'In progress', notes: '', breakdown: [] };
+  return { id: crypto.randomUUID(), entryType: ENTRY_TYPES.includes(previous.entryType) ? previous.entryType : 'field', title: '', ticketId: '', description: '', kind: KINDS.includes(previous.kind) ? previous.kind : KINDS[0], custom: previous.custom || '', area: '', zEnd: '', quantity: '', unit: UNITS.includes(previous.unit) ? previous.unit : 'bundles', status: 'In progress', notes: '', breakdown: [] };
 }
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const lines = value => escapeHTML(value).replace(/\n/g, '<br>');
-export const taskName = task => task.kind === 'Custom task' ? task.custom : task.kind;
+const lines = value => escapeHTML(value).replace(/\n/g, '<br>\n');
+export const taskName = task => task.title || (task.kind === 'Custom task' ? task.custom : task.kind);
 export function taskDetails(task) {
   const parts = [];
+  if (task.description) parts.push(`Description: ${task.description}`);
+  if (task.notes) parts.push(`Work performed: ${task.notes}`);
   if (task.quantity !== '') parts.push(`${task.quantity} ${task.unit}`);
   for (const row of task.breakdown) {
     const groups = Number(row.groups), count = Number(row.perGroup);
     parts.push(`${Number(row.length)} m: ${groups} ${groups === 1 ? 'group' : 'groups'} × ${count} fibers = ${groups * count} fibers`);
   }
   if (task.zEnd) parts.push(`Z-end: ${task.zEnd}`);
-  if (task.notes) parts.push(task.notes);
-  return parts.join('\n') || 'Quantity not recorded';
+  return parts.join('\n');
 }
 export function reportWarnings(day) {
   const warnings = [];
@@ -44,7 +46,6 @@ export function reportWarnings(day) {
   if (!day.header.supervisor.trim()) warnings.push('Add the supervisor.');
   if (!day.header.crew.trim()) warnings.push('Add your crew.');
   if (!day.tasks.length) warnings.push('Add at least one task.');
-  if (day.tasks.some(task => !task.area.trim())) warnings.push('Add a row or work area to each task.');
   if (day.blockerState === 'Not reviewed') warnings.push('Review blockers: choose None or Reported.');
   if (day.blockerState === 'Reported' && !day.blockers.trim()) warnings.push('Describe the reported blocker.');
   return warnings;
@@ -54,17 +55,23 @@ function clockLabel(value) {
   const [hours, minutes] = value.split(':').map(Number);
   return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
 }
-export function renderReport(day) {
+export function reportData(day) {
   const dateLabel = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const heading = `${reportWarnings(day).length ? 'Draft EOD' : 'EOD'} — ${dateLabel}`;
   const header = [['Shift', `${clockLabel(day.header.start)}–${clockLabel(day.header.end)}`], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ['Acting lead', day.header.lead || 'Not recorded'], ['Crew', day.header.crew || 'Not recorded']];
-  const taskRows = day.tasks.map(task => [taskName(task), task.area || 'Not recorded', taskDetails(task), task.status]);
+  const hasLocation = day.tasks.some(task => task.area);
+  const labels = ['Work / ticket', ...(hasLocation ? ['Row / location'] : []), 'Description / progress', 'Status'];
+  const taskRows = day.tasks.map(task => [[taskName(task), task.ticketId ? `Ticket: ${task.ticketId}` : ''].filter(Boolean).join('\n'), ...(hasLocation ? [task.area || '—'] : []), taskDetails(task) || '—', task.status]);
   const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
+  return { heading, header, labels, taskRows, blockers, carryover: day.carryover.trim() };
+}
+export function renderReport(day) {
+  const { heading, header, labels, taskRows, blockers, carryover } = reportData(day);
   const cell = 'border:1px solid #b5bec7;padding:9px;text-align:left;vertical-align:top;';
-  const table = (labels, rows) => `<table style="border-collapse:collapse;width:100%;margin:12px 0;font:14px Arial,sans-serif;"><thead><tr>${labels.map(label => `<th style="${cell}background:#edf1f5;">${lines(label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(value => `<td style="${cell}">${lines(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const table = (labels, rows) => `<table border="1" cellpadding="9" cellspacing="0" style="border-collapse:collapse;width:100%;margin:12px 0;font:14px Arial,sans-serif;">\n<thead><tr>${labels.map(label => `<th style="${cell}background:#edf1f5;">${lines(label)}</th>`).join('\t')}</tr></thead>\n<tbody>\n${rows.map(row => `<tr>${row.map(value => `<td style="${cell}">${lines(value)}</td>`).join('\t')}</tr>`).join('\n')}\n</tbody></table>\n`;
   return {
-    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1><h2 style="font-size:17px;">Shift details</h2>${table(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Tasks</h2>${taskRows.length ? table(['Task', 'Row / work area', 'Quantity / details', 'Status'], taskRows) : '<p>No tasks recorded.</p>'}<h2 style="font-size:17px;">Blockers</h2><p>${lines(blockers)}</p>${day.carryover.trim() ? `<h2 style="font-size:17px;">Carryover / next shift</h2><p>${lines(day.carryover)}</p>` : ''}</div>`,
-    text: `${heading}\n\nShift details\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nTasks\n${taskRows.length ? taskRows.map(([name, area, details, status]) => `${name} | ${area} | ${status}\n${details}`).join('\n\n') : 'No tasks recorded.'}\n\nBlockers\n${blockers}${day.carryover.trim() ? `\n\nCarryover / next shift\n${day.carryover}` : ''}`
+    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${table(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Work completed / in progress</h2>\n${taskRows.length ? table(labels, taskRows) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
+    text: `${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nWORK COMPLETED / IN PROGRESS\n${day.tasks.length ? day.tasks.map((task, index) => [`${index + 1}. ${taskName(task)}`, task.ticketId ? `Ticket: ${task.ticketId}` : '', task.area ? `Location: ${task.area}` : '', taskDetails(task), `Status: ${task.status}`].filter(Boolean).join('\n')).join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`
   };
 }
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -92,14 +99,20 @@ export function validateTask(value) {
     if (!isObject(row)) throw new Error('Invalid cable breakdown.');
     return { length: positive(row.length), groups: positive(row.groups, true), perGroup: positive(row.perGroup, true) };
   }) };
-  if (task.kind === 'Custom task' && !task.custom.trim()) throw new Error('Give your custom task a name.');
+  task.entryType = value.entryType ?? 'field';
+  if (!ENTRY_TYPES.includes(task.entryType)) throw new Error('Choose a valid work entry type.');
+  task.title = textField(value.title, 200);
+  task.ticketId = textField(value.ticketId, 160);
+  task.description = textField(value.description);
+  if (task.entryType !== 'field' && !task.title.trim()) throw new Error('Add a short title for this work.');
+  if (task.entryType === 'field' && task.kind === 'Custom task' && !task.custom.trim()) throw new Error('Give your custom task a name.');
   return task;
 }
 export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || raw.schema !== 1 || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
   for (const [date, value] of Object.entries(raw.days)) {
@@ -119,5 +132,5 @@ export function mergeBackup(current, incoming) {
   for (const [date, day] of Object.entries(current.days)) {
     if (!Object.hasOwn(days, date) || hasDayContent(day, current.defaults)) days[date] = day;
   }
-  return { schema: 1, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, days };
+  return { schema: 2, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, days };
 }

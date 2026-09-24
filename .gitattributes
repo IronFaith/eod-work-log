@@ -1,0 +1,2 @@
+# Keep upstream bundles intact, including whitespace in their license notices.
+vendor/* -whitespace

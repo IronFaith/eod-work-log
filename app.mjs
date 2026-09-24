@@ -1,4 +1,5 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=2';
+import { buildReportPdf } from './pdf.mjs?v=2';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer;
@@ -63,8 +64,9 @@ function renderTasks() {
   $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} recorded · ${completed} completed` : 'Add a task as you go.';
   $('task-list').innerHTML = tasks.length ? tasks.map(task => {
     const statusClass = task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
-    return `<article class="task-card ${statusClass}"><div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(taskName(task))}</p><h3>${esc(task.area || 'Work area not recorded')}</h3></div><span class="status ${statusClass}">${esc(task.status)}</span></div><p class="task-details">${esc(taskDetails(task))}</p></div><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">Next row</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete ${esc(taskName(task))} at ${esc(task.area)}">Delete</button></div></article>`;
-  }).join('') : '<div class="empty-state"><div class="empty-icon" aria-hidden="true">+</div><h3>Start with your first task</h3><p>Choose a task above, add the row and what you worked on. Your report comes together as you go.</p></div>';
+    const context = [task.ticketId ? `Ticket ${task.ticketId}` : task.entryType === 'ticket' ? 'Ticket' : task.entryType === 'general' ? 'General work' : 'Field work', task.area].filter(Boolean).join(' · ');
+    return `<article class="task-card ${statusClass}"><div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div><span class="status ${statusClass}">${esc(task.status)}</span></div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete ${esc(taskName(task))}">Delete</button></div></article>`;
+  }).join('') : '<div class="empty-state"><div class="empty-icon" aria-hidden="true">+</div><h3>Start with your first entry</h3><p>Add field work, a ticket, or a general task. Record what you did; include rows and quantities when they apply.</p></div>';
 }
 function renderReportView() {
   const warnings = reportWarnings(day());
@@ -72,6 +74,7 @@ function renderReportView() {
   $('report-checks').innerHTML = `<strong>A few details still need your review</strong><ul>${warnings.map(warning => `<li>${esc(warning)}</li>`).join('')}</ul><p class="small">Your report is marked Draft until these are filled in.</p>`;
   $('report-preview').innerHTML = renderReport(day()).html;
   $('manual-copy').hidden = true;
+  $('share-status').hidden = true;
 }
 function renderHistory() {
   const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
@@ -98,8 +101,13 @@ function chooseDate(date) {
 }
 
 for (const [id, values] of [['task-kind', KINDS], ['task-status', STATUSES], ['task-unit', UNITS]]) $(id).innerHTML = values.map(value => `<option>${esc(value)}</option>`).join('');
+const entryType = () => document.querySelector('[name="entry-type"]:checked').value;
 function syncCustom() {
-  const custom = $('task-kind').value === 'Custom task';
+  const field = entryType() === 'field';
+  const custom = field && $('task-kind').value === 'Custom task';
+  $('kind-label').hidden = !field;
+  $('task-title').required = !field;
+  $('title-optional').hidden = !field;
   $('custom-label').hidden = !custom;
   $('task-custom').required = custom;
 }
@@ -121,18 +129,19 @@ function openTask(task, edit = false) {
   $('dialog-title').textContent = edit ? 'Edit task' : 'Add a task';
   $('task-error').hidden = true;
   $('task-form').reset();
-  for (const [field, property] of [['kind', 'kind'], ['status', 'status'], ['custom', 'custom'], ['area', 'area'], ['zend', 'zEnd'], ['quantity', 'quantity'], ['unit', 'unit'], ['notes', 'notes']]) $(`task-${field}`).value = task[property] || '';
+  document.querySelectorAll('[name="entry-type"]').forEach(input => { input.checked = input.value === (task.entryType || 'field'); });
+  for (const [field, property] of [['title', 'title'], ['ticket', 'ticketId'], ['description', 'description'], ['kind', 'kind'], ['status', 'status'], ['custom', 'custom'], ['area', 'area'], ['zend', 'zEnd'], ['quantity', 'quantity'], ['unit', 'unit'], ['notes', 'notes']]) $(`task-${field}`).value = task[property] || '';
   syncCustom();
   renderBreakdown(task.breakdown);
   $('breakdown-details').open = !!task.breakdown.length;
+  $('location-details').open = entryType() === 'field' || !!task.area || !!task.zEnd || task.quantity !== '';
   $('task-dialog').showModal();
-  (task.kind === 'Custom task' ? $('task-custom') : $('task-area')).focus();
+  (entryType() === 'field' ? (task.kind === 'Custom task' ? $('task-custom') : $('task-area')) : $('task-title')).focus();
 }
 function submitTask(event) {
   event.preventDefault();
   try {
-    const task = validateTask({ id: editingTask || crypto.randomUUID(), kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() });
-    if (!task.area) throw new Error('Add a row or work area.');
+    const task = validateTask({ id: editingTask || crypto.randomUUID(), entryType: entryType(), title: $('task-title').value.trim(), ticketId: $('task-ticket').value.trim(), description: $('task-description').value.trim(), kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() });
     const index = day().tasks.findIndex(value => value.id === editingTask);
     if (index >= 0) day().tasks[index] = task;
     else day().tasks.push(task);
@@ -158,21 +167,46 @@ function downloadFile(content, name, type) {
 }
 async function copyReport(rich) {
   const report = renderReport(day());
+  $('manual-copy').hidden = true;
   try {
-    if (rich && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
-      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([report.html], { type: 'text/html' }), 'text/plain': new Blob([report.text], { type: 'text/plain' }) })]);
-      toast('Formatted report copied. Review it after pasting into Teams.');
+    if (rich) {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Formatted copying unavailable');
+      const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>\n${report.html}\n</body></html>`;
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([report.text], { type: 'text/plain' }) })]);
+      shareStatus('Formatted report copied. If Teams flattens it, share the PDF to keep the tables or try Copy readable text.');
       return;
     }
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
     await navigator.clipboard.writeText(report.text);
-    toast(rich ? 'Plain text copied. Formatted copy isn’t supported here.' : 'Plain-text report copied');
+    shareStatus('Readable text copied with numbered entries and line breaks. Review the paste in Teams before sending.');
   } catch {
+    if (rich) { shareStatus('This browser could not copy the formatted report. Use Copy readable text or share the PDF.'); return; }
     $('manual-text').value = report.text;
     $('manual-copy').hidden = false;
     $('manual-text').focus();
     $('manual-text').select();
     toast('Select and copy the report text below.');
+  }
+}
+function shareStatus(message) {
+  $('share-status').textContent = message;
+  $('share-status').hidden = false;
+}
+async function exportPdf(share = false) {
+  try {
+    const doc = buildReportPdf(day());
+    const name = `EOD-${activeDate}.pdf`;
+    const blob = doc.output('blob');
+    const file = new File([blob], name, { type: 'application/pdf' });
+    if (share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: `EOD ${activeDate}` });
+      shareStatus('PDF handed to the share sheet. Review the selected destination before sending.');
+    } else {
+      downloadFile(blob, name, 'application/pdf');
+      shareStatus('PDF download requested. Attach it in Teams to keep the tables. On iPhone, find it in Files → Downloads.');
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') shareStatus('The PDF could not be created or shared. Try Download PDF again, or copy the report text.');
   }
 }
 async function importFile(file) {
@@ -201,8 +235,10 @@ $('review-report').addEventListener('click', () => showTab('report'));
 $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab('today'); });
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
 $('add-task').addEventListener('click', () => openTask(nextTask()));
+for (const type of ['ticket', 'general']) $(`add-${type}`).addEventListener('click', () => openTask(nextTask({ entryType: type })));
 document.querySelectorAll('[data-quick]').forEach(button => button.addEventListener('click', () => openTask(nextTask({ kind: button.dataset.quick }))));
 $('task-kind').addEventListener('change', syncCustom);
+document.querySelectorAll('[name="entry-type"]').forEach(input => input.addEventListener('change', () => { syncCustom(); $('location-details').open = input.value === 'field' || !!$('task-area').value || !!$('task-quantity').value; }));
 $('task-form').addEventListener('submit', submitTask);
 for (const id of ['close-task', 'cancel-task']) $(id).addEventListener('click', () => $('task-dialog').close());
 $('add-breakdown').addEventListener('click', () => { const rows = collectBreakdown(); if (rows.length >= 100) return toast('Use up to 100 length groups per task.'); rows.push({ length: '', groups: '', perGroup: '' }); renderBreakdown(rows); $('breakdown-details').open = true; $('breakdown-list').lastElementChild.querySelector('input').focus(); });
@@ -216,7 +252,7 @@ $('task-list').addEventListener('click', event => {
   if (button.dataset.action === 'edit') return openTask(structuredClone(task), true);
   if (button.dataset.action === 'next') return openTask(nextTask(task));
   if (button.dataset.action === 'delete') {
-    if (!window.confirm(`Delete ${taskName(task)} at ${task.area}? This removes it from this day’s report.`)) return;
+    if (!window.confirm(`Delete ${taskName(task)}${task.area ? ` at ${task.area}` : ''}? This removes it from this day’s report.`)) return;
     day().tasks = day().tasks.filter(value => value.id !== task.id);
   } else if (button.dataset.action === 'complete') task.status = task.status === 'Completed' ? 'In progress' : 'Completed';
   persist(); renderTasks();
@@ -225,6 +261,9 @@ document.querySelectorAll('[name="blocker-state"]').forEach(input => input.addEv
 for (const key of ['blockers', 'carryover']) $(key).addEventListener('input', event => { day()[key] = event.target.value; persist(); });
 $('copy-rich').addEventListener('click', () => copyReport(true));
 $('copy-plain').addEventListener('click', () => copyReport(false));
+$('share-pdf').hidden = !navigator.share || !navigator.canShare;
+$('share-pdf').addEventListener('click', () => exportPdf(true));
+$('download-pdf').addEventListener('click', () => exportPdf());
 $('export-backup').addEventListener('click', () => { downloadFile(exportBackup(state), `eod-backup-${localDate()}.json`, 'application/json'); toast('Backup download requested. Keep it in a private folder.'); });
 $('import-backup').addEventListener('click', () => $('backup-file').click());
 $('backup-file').addEventListener('change', event => importFile(event.target.files[0]));
