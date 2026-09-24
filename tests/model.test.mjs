@@ -1,6 +1,57 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newState, ensureDay, nextTask, quickTasks, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask } from '../model.mjs';
+import { newState, ensureDay, nextTask, quickTasks, taskName, taskDetails, reportData, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask, hasDayContent } from '../model.mjs';
+
+test('reports omit an empty acting lead while retaining the crew names', () => {
+  const day = ensureDay(newState(), '2026-09-24');
+  day.header.crew = 'Test technician A\nTest technician B';
+  for (const lead of ['', '  \n ']) {
+    day.header.lead = lead;
+    assert.ok(!reportData(day).header.some(([label]) => label === 'Acting lead'));
+    assert.doesNotMatch(renderReport(day).html, /Acting lead/);
+    assert.doesNotMatch(renderReport(day, { detailed: true }).text, /Acting lead/);
+    assert.match(renderReport(day).text, /Test technician A\nTest technician B/);
+  }
+  day.header.lead = 'Test lead';
+  assert.ok(reportData(day).header.some(([label, value]) => label === 'Acting lead' && value === 'Test lead'));
+});
+
+test('a titled update can omit its description and retains both fields when provided', () => {
+  const state = newState();
+  const day = ensureDay(state, '2026-09-24');
+  day.tasks = [
+    validateTask({ ...nextTask(), entryType: 'quick', title: 'INC-204 — Restore rack connection', summary: '', status: '' }),
+    validateTask({ ...nextTask(), entryType: 'quick', title: 'Pull fiber — Row A', summary: 'Pulled 4 bundles; 2 remaining.', status: '' })
+  ];
+  const restored = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(taskName(restored.tasks[0]), 'INC-204 — Restore rack connection');
+  assert.equal(taskDetails(restored.tasks[1]), 'Pulled 4 bundles; 2 remaining.');
+  assert.equal(restored.tasks[0].summary, '');
+  assert.equal(restored.tasks[0].status, '');
+  for (const detailed of [false, true]) {
+    const report = renderReport(restored, { detailed });
+    assert.match(report.text, /INC-204 — Restore rack connection/);
+    assert.match(report.text, /Pull fiber — Row A\nPulled 4 bundles; 2 remaining\./);
+  }
+});
+
+test('title and description drafts survive reload and keep the report in draft', () => {
+  const state = newState();
+  const day = ensureDay(state, '2026-09-24');
+  day.updateTitleDraft = 'INC-204 — Restore connection';
+  day.updateDescriptionDraft = 'Checked both ends.';
+  const restored = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(restored.updateTitleDraft, day.updateTitleDraft);
+  assert.equal(restored.updateDescriptionDraft, day.updateDescriptionDraft);
+  assert.ok(reportWarnings(restored).some(warning => /draft update/i.test(warning)));
+  assert.ok(hasDayContent(restored, state.defaults));
+  delete day.updateTitleDraft;
+  delete day.updateDescriptionDraft;
+  state.schema = 3;
+  const legacy = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(legacy.updateTitleDraft, '');
+  assert.equal(legacy.updateDescriptionDraft, '');
+});
 
 test('pasted tickets stay together when grouped as blocks or one note', () => {
   const source = 'INC-204\r\nChecked both ends; stable\r\n \r\nRow B\nDressed 3 bundles';

@@ -2,15 +2,15 @@
 
 A small static website for recording daily work and preparing an end-of-day report for Teams.
 
-- **Today:** one notes box for production updates. Type, dictate with your keyboard, or paste lines, a whole ticket/note, blocks separated by blank lines, or spreadsheet rows. Review batches, shorten the text, and select what belongs in the report. Exact repeats start unchecked but can be included when they represent separate work. No ticket description, row, or status is required or inferred. Unadded notes and grouping preferences are saved as a draft. Detailed entries and cable breakdowns remain available under an optional disclosure.
-- **Report:** review a compact production table and share or download its PDF from the main report card. The card shows the report date, update count, and Draft/Ready status. Missing details link back to the log. Full ticket descriptions and text-copy methods remain under **Report options & text copy**; older records retain all their fields.
+- **Today:** enter a ticket or task title and an optional description. A title alone is enough; include results, quantities, blockers, or next steps only when useful. Ctrl+Enter or Cmd+Enter adds the update. Unadded titles and descriptions are saved as a draft. **Paste several updates or spreadsheet rows** groups and reviews batches; exact repeats start unchecked but can be included when they represent separate work. No row, ticket description, or status is required or inferred. Detailed entries and cable breakdowns remain available under an optional disclosure.
+- **Report:** review a compact production table and share or download its PDF from the main report card. Acting lead appears only when a name is entered; crew names remain visible. The card shows the report date, update count, and Draft/Ready status. Missing details link back to the log. Full ticket descriptions and text-copy methods remain under **Report options & text copy**; older records retain all their fields.
 - **History:** reopen days and export/import JSON backups. Imports keep existing dates and add missing dates.
 
 The public repository contains only the app and synthetic test fixtures. It does not contain crew details or real work records. There are no analytics, external scripts, report-upload endpoints, or cloud accounts. App data is stored in this browser's localStorage, under `eod-work-log:v1`.
 
 ## Paste from your computer
 
-Copy the ticket notes or cells you want to report, then paste into **What did you get done?** with Ctrl+V (Windows) or Cmd+V (Mac). Choose the grouping that fits:
+For one update, paste or type into **Title / ticket** and add a description if useful. To import several updates, open **Paste several updates or spreadsheet rows**, then paste into **Paste your updates** with Ctrl+V (Windows) or Cmd+V (Mac). Choose the grouping that fits:
 
 - **One update per line:** for short production lists. A single new line adds immediately; batches open a review first.
 - **One whole ticket / note:** keeps a multiline ticket together. Trim the original request down to the reference and result during review.
@@ -29,7 +29,7 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy alternate format** writes both HTML and plain text through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 3 reads existing version 1 and 2 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 3 to retain quick updates and drafts. Old app versions cannot read schema 3 backups.
+Version 3.3 reads existing schema 1, 2, and 3 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 4 to retain title-only updates and title/description drafts. Older app versions cannot read schema 4 backups.
 
 An internet connection is needed to launch the app. There is no service worker or offline-launch support. Storage is tied to this website and browser context; it is not encrypted cloud storage or automatic iCloud sync. Clearing browser data can remove reports. Keep periodic backup exports in a private location such as Files or iCloud Drive. Do not commit backups to this repository.
 

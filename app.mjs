@@ -1,5 +1,5 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.2';
-import { buildReportPdf } from './pdf.mjs?v=3.2';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.3';
+import { buildReportPdf } from './pdf.mjs?v=3.3';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -43,7 +43,7 @@ function persist(markDay = true) {
 }
 function summary() {
   const header = day().header;
-  $('shift-summary').textContent = [header.location, header.lead ? `Lead: ${header.lead}` : ''].filter(Boolean).join(' · ') || 'Set up your day';
+  $('shift-summary').textContent = [header.location, header.lead.trim() ? `Lead: ${header.lead.trim()}` : ''].filter(Boolean).join(' · ') || 'Set up your day';
 }
 function renderHeader() {
   $('report-date').value = activeDate;
@@ -57,7 +57,11 @@ function fillDay() {
   $('blockers').value = day().blockers;
   $('blocker-label').hidden = day().blockerState !== 'Reported';
   $('carryover').value = day().carryover;
+  $('update-title').value = day().updateTitleDraft;
+  $('update-description').value = day().updateDescriptionDraft;
+  updateTitleButton();
   $('quick-notes').value = day().quickDraft;
+  $('batch-entry').open = !!day().quickDraft;
   $('quick-mode').value = day().quickMode;
   $('quick-table-headers').checked = day().quickTableHeaders;
   updateQuickButton();
@@ -69,11 +73,32 @@ function renderTasks() {
   const tasks = day().tasks;
   $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'entry' : 'entries'} in your report` : 'Your updates will appear here.';
   $('task-list').innerHTML = tasks.length ? tasks.map(task => {
-    if (task.entryType === 'quick') return `<article class="task-card quick-card"><p class="quick-update">${esc(task.summary)}</p><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}">Delete</button></div></article>`;
+    if (task.entryType === 'quick') return `<article class="task-card quick-card">${task.title ? `<div class="quick-update titled-update"><h3>${esc(task.title)}</h3>${task.summary ? `<p>${esc(task.summary)}</p>` : ''}</div>` : `<p class="quick-update">${esc(task.summary)}</p>`}<div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}">Delete</button></div></article>`;
     const statusClass = task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
     const context = [task.ticketId ? `Ticket ${task.ticketId}` : task.entryType === 'ticket' ? 'Ticket' : task.entryType === 'general' ? 'General work' : 'Field work', task.area].filter(Boolean).join(' · ');
     return `<article class="task-card ${statusClass}"><div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div><span class="status ${statusClass}">${esc(task.status)}</span></div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete ${esc(taskName(task))}">Delete</button></div></article>`;
   }).join('') : '';
+}
+function updateTitleButton() {
+  $('save-update').disabled = !$('update-title').value.trim();
+  $('update-error').hidden = true;
+}
+function addTitledUpdate(event) {
+  event.preventDefault();
+  try {
+    const title = $('update-title').value.trim();
+    if (!title) throw new Error('Enter a ticket or task title. A description is optional.');
+    if (day().tasks.length >= 1000) throw new Error('Use up to 1,000 entries per day.');
+    const task = validateTask({ ...nextTask(), entryType: 'quick', title, summary: $('update-description').value.trim(), status: '' });
+    day().tasks.push(task);
+    day().updateTitleDraft = '';
+    day().updateDescriptionDraft = '';
+    const saved = persist();
+    $('update-form').reset();
+    updateTitleButton(); renderTasks();
+    $('update-title').focus();
+    toast(saved ? 'Update added' : 'Update added — export a backup to keep it');
+  } catch (error) { $('update-error').textContent = error.message; $('update-error').hidden = false; }
 }
 function updateQuickButton() {
   const mode = quickOptions().mode;
@@ -135,6 +160,11 @@ function addQuickUpdates(event) {
 }
 function openQuickEdit(task) {
   editingTask = task.id;
+  $('quick-edit-title-label').hidden = !task.title;
+  $('quick-edit-title').required = !!task.title;
+  $('quick-edit-title').value = task.title;
+  $('quick-edit-label').textContent = task.title ? 'Description (optional)' : 'Production update';
+  $('quick-edit-text').required = !task.title;
   $('quick-edit-text').value = task.summary;
   $('quick-edit-error').hidden = true;
   $('quick-dialog').showModal();
@@ -153,7 +183,7 @@ function renderReportView() {
   $('share-status').hidden = true;
 }
 function renderHistory() {
-  const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.quickDraft || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
+  const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.updateTitleDraft || value.updateDescriptionDraft || value.quickDraft || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
   $('history-list').innerHTML = days.length ? days.map(value => `<button class="history-item" data-date="${esc(value.date)}"><span><strong>${esc(dateLabel(value.date))}</strong><span class="small muted">${esc(value.header.location || 'Location not recorded')} · ${value.tasks.length} ${value.tasks.length === 1 ? 'task' : 'tasks'}</span></span><span class="chevron" aria-hidden="true">›</span></button>`).join('') : '<div class="empty-state"><h3>Your saved days will appear here</h3><p>Start recording work in Today. You can return to any saved day here.</p></div>';
 }
 function showTab(tab, scroll = true) {
@@ -349,11 +379,22 @@ $('review-report').addEventListener('click', () => showTab('report'));
 $('review-details').addEventListener('click', () => {
   showTab('today');
   $('shift-details').open = true;
-  if (day().quickDraft?.trim()) $('quick-notes').focus();
+  if (day().updateTitleDraft.trim() || day().updateDescriptionDraft.trim()) $('update-title').focus();
+  else if (day().quickDraft?.trim()) { $('batch-entry').open = true; $('quick-notes').focus(); }
 });
 $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab('today'); });
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
 $('add-task').addEventListener('click', () => openTask(nextTask()));
+$('update-form').addEventListener('submit', addTitledUpdate);
+for (const [id, field] of [['update-title', 'updateTitleDraft'], ['update-description', 'updateDescriptionDraft']]) {
+  $(id).addEventListener('input', () => { day()[field] = $(id).value; persist(); updateTitleButton(); });
+  $(id).addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      if (!$('save-update').disabled) $('update-form').requestSubmit();
+    }
+  });
+}
 $('quick-notes').addEventListener('input', () => { day().quickDraft = $('quick-notes').value; persist(); updateQuickButton(); });
 for (const id of ['quick-mode', 'quick-table-headers']) $(id).addEventListener('change', () => {
   day().quickMode = $('quick-mode').value;
@@ -387,7 +428,9 @@ $('quick-edit-form').addEventListener('submit', event => {
   try {
     const index = day().tasks.findIndex(task => task.id === editingTask);
     if (index < 0) throw new Error('This update is no longer available.');
-    day().tasks[index] = validateTask({ ...day().tasks[index], summary: $('quick-edit-text').value.trim() });
+    const title = day().tasks[index].title ? $('quick-edit-title').value.trim() : '';
+    if (day().tasks[index].title && !title) throw new Error('Enter a ticket or task title. A description is optional.');
+    day().tasks[index] = validateTask({ ...day().tasks[index], title, summary: $('quick-edit-text').value.trim() });
     const saved = persist();
     $('quick-dialog').close(); renderTasks();
     toast(saved ? 'Update saved' : 'Update changed — export a backup to keep it');

@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.2">
+  <link rel="stylesheet" href="styles.css?v=3.3">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.2"></script>
+  <script type="module" src="app.mjs?v=3.3"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -36,22 +36,34 @@
             <label>Shift start<input id="shift-start" type="time"></label><label>Shift end<input id="shift-end" type="time"></label>
             <label>Location<input id="shift-location" autocomplete="off" placeholder="Building or work location" maxlength="200"></label>
             <label>Supervisor<input id="shift-supervisor" autocomplete="off" placeholder="Supervisor’s name" maxlength="200"></label>
-            <label>Acting lead<input id="shift-lead" autocomplete="off" placeholder="Lead’s name" maxlength="200"></label>
-            <label>Crew<textarea id="shift-crew" rows="2" placeholder="Names, including the lead" maxlength="3000"></textarea></label>
+            <label>Acting lead <span class="optional">optional</span><input id="shift-lead" autocomplete="off" placeholder="Leave blank if none" maxlength="200"></label>
+            <label>Crew<textarea id="shift-crew" rows="2" placeholder="Crew members’ names" maxlength="3000"></textarea></label>
           </div>
           <div class="defaults-row"><button id="save-defaults" class="button secondary" type="button">Use these details for future days</button><p class="muted small">New days always start with fresh tasks and blockers.</p></div>
         </div>
       </details>
 
       <section class="work-section" aria-labelledby="tasks-title">
-        <div class="section-heading"><div><h2 id="tasks-title">Quick production log</h2><p class="muted small">Just the reference and what got done. Keep the full details in your tickets.</p></div></div>
+        <div class="section-heading"><div><h2 id="tasks-title">Add an update</h2><p class="muted small">A ticket or task title is enough. Add a description only when it helps.</p></div></div>
+        <form id="update-form" class="quick-composer">
+          <label for="update-title">Title / ticket</label>
+          <input id="update-title" maxlength="200" placeholder="INC-204 — Restore rack connection" aria-describedby="update-title-help" required>
+          <p id="update-title-help" class="small muted field-help">Use a ticket title or a task like “Pull fiber — Row A”.</p>
+          <label for="update-description">Description <span class="optional">optional</span></label>
+          <textarea id="update-description" rows="3" maxlength="12000" placeholder="Replaced the patch cable; link stable." aria-describedby="update-description-help"></textarea>
+          <p id="update-description-help" class="small muted field-help">Add the result, quantity, blocker, or next step if useful. No need to repeat the full ticket.</p>
+          <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
+          <p id="update-error" class="small danger-text" role="alert" hidden></p>
+        </form>
+        <details id="batch-entry" class="detailed-entry"><summary>Paste several updates or spreadsheet rows</summary>
         <form id="quick-form" class="quick-composer">
           <div class="paste-setup"><label for="quick-mode">How should this paste be grouped?<select id="quick-mode"><option value="lines">One update per line</option><option value="single">One whole ticket / note</option><option value="blocks">Separate by blank lines</option><option value="table">Spreadsheet rows (tabs)</option></select></label><label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label></div>
-          <label for="quick-notes">What did you get done?</label>
+          <label for="quick-notes">Paste your updates</label>
           <textarea id="quick-notes" rows="4" maxlength="12000" placeholder="INC-204 — restored link; complete&#10;Row A — pulled 4 bundles; 2 remaining" aria-describedby="quick-help"></textarea>
           <div class="quick-footer"><p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update. Use Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
           <p id="quick-error" class="small danger-text" role="alert" hidden></p>
         </form>
+        </details>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
         <p id="task-count" class="muted small log-count"></p>
         <div id="task-list"></div>
@@ -94,7 +106,7 @@
   <nav class="bottom-nav" aria-label="Main navigation"><button data-tab="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 11h16m-11 4h2m3 0h2"/></svg><span>Today</span></button><button data-tab="report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H5V3h2zm7 0v6h5M8 13h8m-8 4h6"/></svg><span>Report</span></button><button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6m2-3v5l3 2"/></svg><span>History</span></button></nav>
   <div id="toast" role="status" class="toast" hidden></div>
 
-  <dialog id="quick-dialog" aria-labelledby="quick-dialog-title"><form id="quick-edit-form"><header class="dialog-header"><h2 id="quick-dialog-title">Edit update</h2><button id="close-quick" type="button" class="icon-button" aria-label="Close update editor">×</button></header><div class="dialog-body"><label>Production update<textarea id="quick-edit-text" rows="5" maxlength="12000" required></textarea></label><p class="muted small">Keep just the reference, result, and anything still needed.</p><p id="quick-edit-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-quick" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save update</button></footer></form></dialog>
+  <dialog id="quick-dialog" aria-labelledby="quick-dialog-title"><form id="quick-edit-form"><header class="dialog-header"><h2 id="quick-dialog-title">Edit update</h2><button id="close-quick" type="button" class="icon-button" aria-label="Close update editor">×</button></header><div class="dialog-body"><label id="quick-edit-title-label" hidden>Title / ticket<input id="quick-edit-title" maxlength="200"></label><label id="quick-edit-label" for="quick-edit-text">Production update</label><textarea id="quick-edit-text" rows="5" maxlength="12000" required></textarea><p class="muted small">Keep just the reference, result, and anything still needed.</p><p id="quick-edit-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-quick" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save update</button></footer></form></dialog>
 
   <dialog id="paste-dialog" aria-labelledby="paste-title"><form id="paste-form"><header class="dialog-header"><h2 id="paste-title">Review pasted updates</h2><button id="close-paste" type="button" class="icon-button" aria-label="Close paste review">×</button></header><div class="dialog-body"><p class="small muted">Keep the reference, work completed, and anything still needed. Edit the text or uncheck entries you don’t want in the report. Exact repeats start unchecked.</p><div id="paste-list"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-paste" type="button" class="button secondary">Back to paste</button><button id="save-paste" type="submit" class="button primary">Add selected updates</button></footer></form></dialog>
 
