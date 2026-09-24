@@ -1,0 +1,123 @@
+export const STORAGE_KEY = 'eod-work-log:v1';
+export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
+export const UNITS = ['bundles', 'fibers', 'cables', 'connections', 'items'];
+export const STATUSES = ['In progress', 'Completed', 'Blocked'];
+const HEADER_KEYS = ['location', 'supervisor', 'lead', 'crew', 'start', 'end'];
+export const blankHeader = () => Object.fromEntries(HEADER_KEYS.map(key => [key, '']));
+export function localDate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+export function validDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T12:00:00`);
+  return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
+}
+export function newState() { return { schema: 1, defaults: blankHeader(), days: {} }; }
+export function ensureDay(state, date) {
+  if (!validDate(date)) throw new Error('Choose a valid date.');
+  if (!Object.hasOwn(state.days, date)) state.days[date] = {
+    date, header: { ...state.defaults }, tasks: [], blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
+  };
+  return state.days[date];
+}
+export function nextTask(previous = {}) {
+  return { id: crypto.randomUUID(), kind: KINDS.includes(previous.kind) ? previous.kind : KINDS[0], custom: previous.custom || '', area: '', zEnd: '', quantity: '', unit: UNITS.includes(previous.unit) ? previous.unit : 'bundles', status: 'In progress', notes: '', breakdown: [] };
+}
+export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const lines = value => escapeHTML(value).replace(/\n/g, '<br>');
+export const taskName = task => task.kind === 'Custom task' ? task.custom : task.kind;
+export function taskDetails(task) {
+  const parts = [];
+  if (task.quantity !== '') parts.push(`${task.quantity} ${task.unit}`);
+  for (const row of task.breakdown) {
+    const groups = Number(row.groups), count = Number(row.perGroup);
+    parts.push(`${Number(row.length)} m: ${groups} ${groups === 1 ? 'group' : 'groups'} × ${count} fibers = ${groups * count} fibers`);
+  }
+  if (task.zEnd) parts.push(`Z-end: ${task.zEnd}`);
+  if (task.notes) parts.push(task.notes);
+  return parts.join('\n') || 'Quantity not recorded';
+}
+export function reportWarnings(day) {
+  const warnings = [];
+  if (!day.header.start || !day.header.end) warnings.push('Add shift start and end times.');
+  if (!day.header.location.trim()) warnings.push('Add the work location.');
+  if (!day.header.supervisor.trim()) warnings.push('Add the supervisor.');
+  if (!day.header.crew.trim()) warnings.push('Add your crew.');
+  if (!day.tasks.length) warnings.push('Add at least one task.');
+  if (day.tasks.some(task => !task.area.trim())) warnings.push('Add a row or work area to each task.');
+  if (day.blockerState === 'Not reviewed') warnings.push('Review blockers: choose None or Reported.');
+  if (day.blockerState === 'Reported' && !day.blockers.trim()) warnings.push('Describe the reported blocker.');
+  return warnings;
+}
+function clockLabel(value) {
+  if (!value) return 'Not recorded';
+  const [hours, minutes] = value.split(':').map(Number);
+  return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
+}
+export function renderReport(day) {
+  const dateLabel = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const heading = `${reportWarnings(day).length ? 'Draft EOD' : 'EOD'} — ${dateLabel}`;
+  const header = [['Shift', `${clockLabel(day.header.start)}–${clockLabel(day.header.end)}`], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ['Acting lead', day.header.lead || 'Not recorded'], ['Crew', day.header.crew || 'Not recorded']];
+  const taskRows = day.tasks.map(task => [taskName(task), task.area || 'Not recorded', taskDetails(task), task.status]);
+  const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
+  const cell = 'border:1px solid #b5bec7;padding:9px;text-align:left;vertical-align:top;';
+  const table = (labels, rows) => `<table style="border-collapse:collapse;width:100%;margin:12px 0;font:14px Arial,sans-serif;"><thead><tr>${labels.map(label => `<th style="${cell}background:#edf1f5;">${lines(label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(value => `<td style="${cell}">${lines(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  return {
+    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1><h2 style="font-size:17px;">Shift details</h2>${table(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Tasks</h2>${taskRows.length ? table(['Task', 'Row / work area', 'Quantity / details', 'Status'], taskRows) : '<p>No tasks recorded.</p>'}<h2 style="font-size:17px;">Blockers</h2><p>${lines(blockers)}</p>${day.carryover.trim() ? `<h2 style="font-size:17px;">Carryover / next shift</h2><p>${lines(day.carryover)}</p>` : ''}</div>`,
+    text: `${heading}\n\nShift details\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nTasks\n${taskRows.length ? taskRows.map(([name, area, details, status]) => `${name} | ${area} | ${status}\n${details}`).join('\n\n') : 'No tasks recorded.'}\n\nBlockers\n${blockers}${day.carryover.trim() ? `\n\nCarryover / next shift\n${day.carryover}` : ''}`
+  };
+}
+const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+function textField(value, limit = 12000) {
+  if (value === undefined) return '';
+  if (typeof value !== 'string' || value.length > limit) throw new Error('This backup contains an invalid text field.');
+  return value;
+}
+function headerFrom(value) {
+  if (!isObject(value)) throw new Error('This backup has invalid shift details.');
+  const header = Object.fromEntries(HEADER_KEYS.map(key => [key, textField(value[key])]));
+  for (const time of [header.start, header.end]) if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('This backup has an invalid shift time.');
+  return header;
+}
+function positive(value, whole = false) {
+  const number = Number(value);
+  if (value === '' || value === null || !Number.isFinite(number) || number <= 0 || number > 1e7 || (whole && !Number.isInteger(number))) throw new Error('Enter a positive number for each cable breakdown field.');
+  return number;
+}
+export function validateTask(value) {
+  if (!isObject(value) || !KINDS.includes(value.kind) || !UNITS.includes(value.unit) || !STATUSES.includes(value.status) || !Array.isArray(value.breakdown) || value.breakdown.length > 100) throw new Error('This task contains invalid values.');
+  const quantity = String(value.quantity ?? '');
+  if (quantity !== '' && (!/^\d+$/.test(quantity) || Number(quantity) > 1e7)) throw new Error('Quantity must be a whole number of zero or more.');
+  const task = { id: textField(value.id, 100) || crypto.randomUUID(), kind: value.kind, custom: textField(value.custom, 160), area: textField(value.area, 200), zEnd: textField(value.zEnd, 200), quantity, unit: value.unit, status: value.status, notes: textField(value.notes), breakdown: value.breakdown.map(row => {
+    if (!isObject(row)) throw new Error('Invalid cable breakdown.');
+    return { length: positive(row.length), groups: positive(row.groups, true), perGroup: positive(row.perGroup, true) };
+  }) };
+  if (task.kind === 'Custom task' && !task.custom.trim()) throw new Error('Give your custom task a name.');
+  return task;
+}
+export function parseBackup(source) {
+  if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
+  let raw;
+  try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
+  if (!isObject(raw) || raw.schema !== 1 || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  const state = newState();
+  state.defaults = headerFrom(raw.defaults);
+  for (const [date, value] of Object.entries(raw.days)) {
+    if (!validDate(date) || !isObject(value) || value.date !== date || !Array.isArray(value.tasks) || value.tasks.length > 1000 || !['None', 'Reported', 'Not reviewed'].includes(value.blockerState)) throw new Error('This backup contains an invalid day.');
+    const tasks = value.tasks.map(validateTask);
+    if (new Set(tasks.map(task => task.id)).size !== tasks.length) throw new Error('This backup contains duplicate task IDs.');
+    state.days[date] = { date, header: headerFrom(value.header), tasks, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
+  }
+  return state;
+}
+export const exportBackup = state => JSON.stringify(state, null, 2);
+export function hasDayContent(day, defaults) {
+  return Boolean(day.updatedAt || day.tasks.length || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
+}
+export function mergeBackup(current, incoming) {
+  const days = { ...incoming.days };
+  for (const [date, day] of Object.entries(current.days)) {
+    if (!Object.hasOwn(days, date) || hasDayContent(day, current.defaults)) days[date] = day;
+  }
+  return { schema: 1, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, days };
+}

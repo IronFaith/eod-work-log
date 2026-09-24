@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#183a56">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="EOD">
+  <meta name="description" content="A simple daily work log. Record your crew's progress and prepare an end-of-day report.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>EOD · Work log</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to work log</a>
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="EOD Work log home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h18M7 15h10M7 23h8M19 22l3 3 6-8"/></svg><span>EOD<span class="brand-detail">Work log</span></span></a>
+    <span id="save-state" class="save-state" role="status">Saved on this device</span>
+  </header>
+  <main id="main">
+    <div id="storage-warning" class="notice danger" role="alert" hidden></div>
+    <div class="day-heading">
+      <div><p id="day-eyebrow" class="eyebrow">Your daily record</p><h1 id="page-title">Today’s work</h1><p id="date-caption" class="muted"></p></div>
+      <label class="date-control">Report date<input id="report-date" type="date" required aria-label="Report date"></label>
+    </div>
+
+    <section id="today-panel" aria-label="Today">
+      <details id="shift-details" class="shift-card" open>
+        <summary><span><strong>Shift details</strong><span id="shift-summary" class="muted small">Set up your day</span></span><span class="disclosure" aria-hidden="true">⌄</span></summary>
+        <div class="shift-body">
+          <div class="fields two">
+            <label>Shift start<input id="shift-start" type="time"></label><label>Shift end<input id="shift-end" type="time"></label>
+            <label>Location<input id="shift-location" autocomplete="off" placeholder="Building or work location" maxlength="200"></label>
+            <label>Supervisor<input id="shift-supervisor" autocomplete="off" placeholder="Supervisor’s name" maxlength="200"></label>
+            <label>Acting lead<input id="shift-lead" autocomplete="off" placeholder="Lead’s name" maxlength="200"></label>
+            <label>Crew<textarea id="shift-crew" rows="2" placeholder="Names, including the lead" maxlength="3000"></textarea></label>
+          </div>
+          <div class="defaults-row"><button id="save-defaults" class="button secondary" type="button">Use these details for future days</button><p class="muted small">New days always start with fresh tasks and blockers.</p></div>
+        </div>
+      </details>
+
+      <section class="work-section" aria-labelledby="tasks-title">
+        <div class="section-heading"><div><h2 id="tasks-title">Work recorded</h2><p id="task-count" class="muted small">Add a task as you go.</p></div><button id="add-task" class="button primary" type="button">+ Add task</button></div>
+        <div class="quick-tasks" aria-label="Quick task types"><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button><button data-quick="Custom task">Custom</button></div>
+        <div id="task-list"></div>
+      </section>
+
+      <section class="blockers-section" aria-labelledby="blockers-title">
+        <div class="section-heading"><div><h2 id="blockers-title">Anything holding you up?</h2><p class="muted small">Confirm blockers before sharing your report.</p></div></div>
+        <fieldset class="segmented"><legend class="sr-only">Blocker status</legend><label><input type="radio" name="blocker-state" value="Not reviewed" checked><span>Not reviewed</span></label><label><input type="radio" name="blocker-state" value="None"><span>None</span></label><label><input type="radio" name="blocker-state" value="Reported"><span>Report blocker</span></label></fieldset>
+        <label id="blocker-label" class="blocker-input" hidden>Blocker details<textarea id="blockers" rows="3" placeholder="What is missing or blocked? Include lengths, quantities, and the affected row." maxlength="12000"></textarea></label>
+        <details class="carryover"><summary>Carryover / next shift <span class="muted small">optional</span></summary><label><span class="sr-only">Carryover / next shift</span><textarea id="carryover" rows="3" placeholder="Where should the next shift pick up?" maxlength="12000"></textarea></label></details>
+      </section>
+      <div class="review-row"><p class="muted small">Ready to wrap up?</p><button id="review-report" class="button primary">Review report</button></div>
+    </section>
+
+    <section id="report-panel" aria-label="Report" hidden>
+      <div class="section-heading"><div><h2>Ready for your supervisor</h2><p class="muted small">Review the details, then copy and paste into Teams.</p></div></div>
+      <div id="report-checks" class="notice" hidden></div>
+      <div class="copy-actions"><button id="copy-rich" class="button primary">Copy for Teams</button><button id="copy-plain" class="button secondary">Copy plain text</button></div>
+      <p class="muted small copy-note">Formatted copy includes tables. Check the result in Teams before sending.</p>
+      <div id="report-preview" class="report-paper"></div>
+      <div id="manual-copy" class="notice" hidden><label>Copy this report<textarea id="manual-text" rows="10" readonly></textarea></label><p class="small">Automatic copying isn’t available here. Select and copy the text above.</p></div>
+    </section>
+
+    <section id="history-panel" aria-label="History" hidden>
+      <div class="section-heading"><div><h2>Your work history</h2><p class="muted small">Open any day to review or update it.</p></div><button id="go-today" class="button secondary">Go to today</button></div>
+      <div id="history-list"></div>
+      <section class="backup-section"><h2>Keep a backup</h2><p>Your reports stay in this browser on this device. Export a backup to Files or iCloud so you have a separate copy.</p><div class="copy-actions"><button id="export-backup" class="button primary">Export backup</button><button id="import-backup" class="button secondary">Import backup</button><input id="backup-file" class="sr-only" type="file" accept="application/json,.json" aria-label="Choose EOD backup"></div><p class="muted small">Import adds missing days. Your existing days and edits are kept.</p></section>
+      <p class="privacy-note">No account or cloud sync. Keep backups private. Internet is needed to open the app; clearing this website’s data removes its saved reports.</p>
+    </section>
+    <noscript><p class="notice danger">JavaScript is needed to save work and create reports. Open this website in Safari or another browser with JavaScript enabled.</p></noscript>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Main navigation"><button data-tab="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 11h16m-11 4h2m3 0h2"/></svg><span>Today</span></button><button data-tab="report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H5V3h2zm7 0v6h5M8 13h8m-8 4h6"/></svg><span>Report</span></button><button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6m2-3v5l3 2"/></svg><span>History</span></button></nav>
+  <div id="toast" role="status" class="toast" hidden></div>
+
+  <dialog id="task-dialog" aria-labelledby="dialog-title">
+    <form id="task-form">
+      <header class="dialog-header"><div><p class="eyebrow">Work entry</p><h2 id="dialog-title">Add a task</h2></div><button id="close-task" type="button" class="icon-button" aria-label="Close task editor">×</button></header>
+      <div class="dialog-body">
+        <div id="task-error" class="notice danger" role="alert" hidden></div>
+        <div class="fields two">
+          <label>Task type<select id="task-kind"></select></label><label>Status<select id="task-status"></select></label>
+          <label id="custom-label" class="full" hidden>Custom task name<input id="task-custom" placeholder="Describe the type of work" maxlength="160"></label>
+          <label>Row / work area<input id="task-area" placeholder="Row or A-end" maxlength="200" required></label><label>Z-end <span class="optional">optional</span><input id="task-zend" placeholder="Connection endpoint" maxlength="200"></label>
+          <label>Quantity <span class="optional">optional</span><input id="task-quantity" type="number" min="0" max="10000000" step="1" inputmode="numeric" placeholder="Enter count"></label><label>Unit<select id="task-unit"></select></label>
+        </div>
+        <details id="breakdown-details" class="breakdown-details"><summary>Cable length breakdown <span class="muted small">optional</span></summary><p class="muted small">Record groups by cable length. This describes the work above; it isn’t added to the task quantity.</p><div id="breakdown-list"></div><button id="add-breakdown" type="button" class="button secondary">+ Add length</button></details>
+        <label class="notes-label">Work details <span class="optional">optional</span><textarea id="task-notes" rows="3" placeholder="Completed scope, remaining work, or actual test result" maxlength="12000"></textarea></label>
+      </div>
+      <footer class="dialog-footer"><button id="cancel-task" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save task</button></footer>
+    </form>
+  </dialog>
+</body>
+</html>
