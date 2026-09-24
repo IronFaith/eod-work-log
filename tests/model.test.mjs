@@ -2,6 +2,40 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, ensureDay, nextTask, quickTasks, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask } from '../model.mjs';
 
+test('pasted tickets stay together when grouped as blocks or one note', () => {
+  const source = 'INC-204\r\nChecked both ends; stable\r\n \r\nRow B\nDressed 3 bundles';
+  assert.deepEqual(quickTasks(source, { mode: 'blocks' }).map(task => task.summary), ['INC-204\nChecked both ends; stable', 'Row B\nDressed 3 bundles']);
+  const single = quickTasks(source, { mode: 'single' });
+  assert.equal(single.length, 1);
+  assert.equal(single[0].summary, 'INC-204\nChecked both ends; stable\n \nRow B\nDressed 3 bundles');
+  assert.equal(single[0].status, '');
+  assert.equal(single[0].ticketId, '');
+});
+
+test('spreadsheet paste keeps quoted multiline cells and labels attached to their rows', () => {
+  const source = 'Ticket\tProgress\tStatus\r\nINC-204\t"Checked both ends\nLink stable"\tDone\r\nINC-205\t"Replaced ""A"" cable"\t\r\n';
+  assert.deepEqual(quickTasks(source, { mode: 'table', headers: true }).map(task => task.summary), ['Ticket: INC-204\nProgress: Checked both ends\nLink stable\nStatus: Done', 'Ticket: INC-205\nProgress: Replaced "A" cable']);
+  assert.deepEqual(quickTasks('Row A\t4 bundles\r\nRow B\t3 bundles', { mode: 'table' }).map(task => task.summary), ['Row A · 4 bundles', 'Row B · 3 bundles']);
+  assert.throws(() => quickTasks('Ticket\tProgress\nINC-204\t"Unfinished', { mode: 'table', headers: true }), /quote/i);
+});
+
+test('paste preferences survive reloads and old backups default to separate lines', () => {
+  const state = newState();
+  const day = ensureDay(state, '2026-09-24');
+  day.quickMode = 'table';
+  day.quickTableHeaders = false;
+  day.quickDraft = 'Row A\t4 bundles';
+  const restored = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(restored.quickMode, 'table');
+  assert.equal(restored.quickTableHeaders, false);
+  assert.equal(restored.quickDraft, 'Row A\t4 bundles');
+  delete day.quickMode;
+  delete day.quickTableHeaders;
+  const legacy = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(legacy.quickMode, 'lines');
+  assert.equal(legacy.quickTableHeaders, true);
+});
+
 test('a quick update survives backup without requiring or inventing ticket fields', () => {
   const state = newState();
   const day = ensureDay(state, '2026-09-24');

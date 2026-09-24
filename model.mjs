@@ -3,6 +3,7 @@ export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressi
 export const UNITS = ['bundles', 'fibers', 'cables', 'connections', 'items'];
 export const STATUSES = ['In progress', 'Completed', 'Blocked'];
 export const ENTRY_TYPES = ['field', 'ticket', 'general', 'quick'];
+export const QUICK_MODES = ['lines', 'single', 'blocks', 'table'];
 const HEADER_KEYS = ['location', 'supervisor', 'lead', 'crew', 'start', 'end'];
 export const blankHeader = () => Object.fromEntries(HEADER_KEYS.map(key => [key, '']));
 export function localDate(date = new Date()) {
@@ -17,7 +18,7 @@ export function newState() { return { schema: 3, defaults: blankHeader(), days: 
 export function ensureDay(state, date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!Object.hasOwn(state.days, date)) state.days[date] = {
-    date, header: { ...state.defaults }, tasks: [], quickDraft: '', blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
+    date, header: { ...state.defaults }, tasks: [], quickDraft: '', quickMode: 'lines', quickTableHeaders: true, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
   };
   return state.days[date];
 }
@@ -40,8 +41,38 @@ export function taskDetails(task, { detailed = true } = {}) {
   if (task.zEnd) parts.push(`Z-end: ${task.zEnd}`);
   return parts.join('\n');
 }
-export function quickTasks(source) {
-  return textField(source).split(/\r\n|\n|\r/).map(line => line.trim()).filter(Boolean).map(summary => validateTask({ ...nextTask(), entryType: 'quick', summary, status: '' }));
+function pastedTable(source) {
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') { cell += '"'; index++; }
+      else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"' && cell === '') quoted = true;
+    else if (char === '\t' || char === '\n') {
+      row.push(cell.trim()); cell = '';
+      if (char === '\n') { rows.push(row); row = []; }
+    } else cell += char;
+  }
+  if (quoted) throw new Error('A table cell has an unclosed quote. Copy the complete rows, or choose One whole ticket / note.');
+  row.push(cell.trim()); rows.push(row);
+  return rows.filter(values => values.some(Boolean));
+}
+export function splitQuickNotes(source, { mode = 'lines', headers = false } = {}) {
+  const text = textField(source).replace(/\r\n|\r/g, '\n');
+  if (!QUICK_MODES.includes(mode)) throw new Error('Choose how to separate your pasted updates.');
+  if (mode === 'table') {
+    const rows = pastedTable(text);
+    const names = headers ? rows.shift() || [] : [];
+    return rows.map(row => row.map((value, index) => value ? (headers ? `${names[index] || `Column ${index + 1}`}: ${value}` : value) : '').filter(Boolean).join(headers ? '\n' : ' · '));
+  }
+  const parts = mode === 'single' ? [text] : text.split(mode === 'blocks' ? /\n[\t ]*\n+/ : /\n/);
+  return parts.map(part => part.trim()).filter(Boolean);
+}
+export function quickTasks(source, options = {}) {
+  return splitQuickNotes(source, options).map(summary => validateTask({ ...nextTask(), entryType: 'quick', summary, status: '' }));
 }
 export function taskSummary(task) {
   if (task.entryType === 'quick') return task.summary;
@@ -136,7 +167,7 @@ export function parseBackup(source) {
     if (!validDate(date) || !isObject(value) || value.date !== date || !Array.isArray(value.tasks) || value.tasks.length > 1000 || !['None', 'Reported', 'Not reviewed'].includes(value.blockerState)) throw new Error('This backup contains an invalid day.');
     const tasks = value.tasks.map(validateTask);
     if (new Set(tasks.map(task => task.id)).size !== tasks.length) throw new Error('This backup contains duplicate task IDs.');
-    state.days[date] = { date, header: headerFrom(value.header), tasks, quickDraft: textField(value.quickDraft), blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
+    state.days[date] = { date, header: headerFrom(value.header), tasks, quickDraft: textField(value.quickDraft), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
   }
   return state;
 }

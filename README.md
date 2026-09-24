@@ -2,11 +2,24 @@
 
 A small static website for recording daily work and preparing an end-of-day report for Teams.
 
-- **Today:** one notes box for production updates. Type, dictate with your keyboard, or paste one update per line, then add them together. Each line is kept as written; no ticket description, row, or status is required or inferred. Unadded notes are saved as a draft. Detailed entries and cable breakdowns remain available under an optional disclosure.
+- **Today:** one notes box for production updates. Type, dictate with your keyboard, or paste lines, a whole ticket/note, blocks separated by blank lines, or spreadsheet rows. Review batches, shorten the text, and select what belongs in the report. Exact repeats start unchecked but can be included when they represent separate work. No ticket description, row, or status is required or inferred. Unadded notes and grouping preferences are saved as a draft. Detailed entries and cable breakdowns remain available under an optional disclosure.
 - **Report:** review a compact production table and share or download its PDF from the main report card. The card shows the report date, update count, and Draft/Ready status. Missing details link back to the log. Full ticket descriptions and text-copy methods remain under **Report options & text copy**; older records retain all their fields.
 - **History:** reopen days and export/import JSON backups. Imports keep existing dates and add missing dates.
 
 The public repository contains only the app and synthetic test fixtures. It does not contain crew details or real work records. There are no analytics, external scripts, report-upload endpoints, or cloud accounts. App data is stored in this browser's localStorage, under `eod-work-log:v1`.
+
+## Paste from your computer
+
+Copy the ticket notes or cells you want to report, then paste into **What did you get done?** with Ctrl+V (Windows) or Cmd+V (Mac). Choose the grouping that fits:
+
+- **One update per line:** for short production lists. A single new line adds immediately; batches open a review first.
+- **One whole ticket / note:** keeps a multiline ticket together. Trim the original request down to the reference and result during review.
+- **Separate by blank lines:** keeps each ticket or note block together.
+- **Spreadsheet rows (tabs):** for cells copied from Excel or another tab-separated table. Set **First row contains column names** to match what you copied. Quoted multiline cells are preserved. Unquoted line breaks are separate rows.
+
+Use Ctrl+Enter or Cmd+Enter in the paste box to continue. In the review, edit or uncheck entries, then **Add N updates**. Back to paste keeps the original draft. Saving adds only checked entries and clears the paste box. Duplicate detection compares exact update text in the current day and pasted batch; it does not match ticket IDs or infer whether similar work is the same task. The app groups text locally; it does not automatically summarize ticket descriptions or invent completion statuses.
+
+Download the PDF directly on your computer when finished. Saved days do not sync automatically to an iPhone; use History → Export backup / Import backup to transfer saved days if needed. Imports add missing dates and keep existing dates.
 
 ## Use on iPhone
 

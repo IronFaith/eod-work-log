@@ -1,5 +1,5 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, quickTasks, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3';
-import { buildReportPdf } from './pdf.mjs?v=3';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.2';
+import { buildReportPdf } from './pdf.mjs?v=3.2';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -15,6 +15,8 @@ try {
 }
 const day = () => ensureDay(state, activeDate);
 const reportOptions = () => ({ detailed: $('report-detail').checked });
+const quickOptions = () => ({ mode: $('quick-mode').value, headers: $('quick-table-headers').checked });
+const repeatKey = text => text.replace(/\r\n|\r/g, '\n').trim();
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
 function toast(message) {
   $('toast').textContent = message;
@@ -56,6 +58,8 @@ function fillDay() {
   $('blocker-label').hidden = day().blockerState !== 'Reported';
   $('carryover').value = day().carryover;
   $('quick-notes').value = day().quickDraft;
+  $('quick-mode').value = day().quickMode;
+  $('quick-table-headers').checked = day().quickTableHeaders;
   updateQuickButton();
   summary();
   renderHeader();
@@ -72,23 +76,61 @@ function renderTasks() {
   }).join('') : '';
 }
 function updateQuickButton() {
-  const count = $('quick-notes').value.split(/\r\n|\n|\r/).filter(line => line.trim()).length;
-  $('save-quick').disabled = !count;
-  $('save-quick').textContent = count > 1 ? `Add ${count} updates` : 'Add to log';
+  const mode = quickOptions().mode;
+  $('table-header-option').hidden = mode !== 'table';
+  const tips = {
+    lines: 'Paste with Ctrl+V or Cmd+V. Each line becomes an update.',
+    single: 'Paste one ticket or note. Its lines stay together; trim the details in the next step.',
+    blocks: 'Leave a blank line between tickets or notes. Lines within each block stay together.',
+    table: 'Copy cells from Excel or a tab-separated table. Each row becomes an update. Check whether you copied column names.'
+  };
+  $('quick-help').textContent = `${tips[mode]} Use Ctrl+Enter or Cmd+Enter to continue.`;
   $('quick-error').hidden = true;
+  try {
+    const count = splitQuickNotes($('quick-notes').value, quickOptions()).length;
+    $('save-quick').disabled = !count;
+    $('save-quick').textContent = count > 1 ? `Review ${count} updates` : mode !== 'lines' ? 'Review update' : 'Add to log';
+    if (!count && mode === 'table' && $('quick-notes').value.trim() && $('quick-table-headers').checked) $('quick-help').textContent = 'Only a header row was found. If you copied a data row without column names, uncheck First row contains column names.';
+  } catch (error) {
+    $('save-quick').disabled = true;
+    $('save-quick').textContent = 'Review updates';
+    $('quick-error').textContent = error.message;
+    $('quick-error').hidden = false;
+  }
+}
+function saveQuickUpdates(summaries) {
+  const tasks = summaries.map(summary => validateTask({ ...nextTask(), entryType: 'quick', summary: summary.trim(), status: '' }));
+  if (day().tasks.length + tasks.length > 1000) throw new Error('Use up to 1,000 entries per day.');
+  day().tasks.push(...tasks);
+  day().quickDraft = '';
+  const saved = persist();
+  $('quick-notes').value = '';
+  updateQuickButton(); renderTasks();
+  toast(saved ? `${tasks.length === 1 ? 'Update' : `${tasks.length} updates`} added` : 'Updates added — export a backup to keep them');
+}
+function updatePasteButton() {
+  const count = $('paste-list').querySelectorAll('input:checked').length;
+  $('save-paste').disabled = !count;
+  $('save-paste').textContent = count ? `Add ${count} ${count === 1 ? 'update' : 'updates'}` : 'Select updates to add';
+  $('paste-error').hidden = true;
 }
 function addQuickUpdates(event) {
   event.preventDefault();
   try {
-    const tasks = quickTasks($('quick-notes').value);
-    if (!tasks.length) return;
-    if (day().tasks.length + tasks.length > 1000) throw new Error('Use up to 1,000 entries per day.');
-    day().tasks.push(...tasks);
-    day().quickDraft = '';
-    const saved = persist();
-    $('quick-notes').value = '';
-    updateQuickButton(); renderTasks();
-    toast(saved ? `${tasks.length === 1 ? 'Update' : `${tasks.length} updates`} added` : 'Updates added — export a backup to keep them');
+    const summaries = splitQuickNotes($('quick-notes').value, quickOptions());
+    if (!summaries.length) return;
+    if (summaries.length > 1000) throw new Error('Review up to 1,000 updates at a time.');
+    const existing = new Set(day().tasks.map(task => repeatKey(taskSummary(task))));
+    if (summaries.length === 1 && quickOptions().mode === 'lines' && !existing.has(repeatKey(summaries[0]))) return saveQuickUpdates(summaries);
+    const seen = new Set();
+    $('paste-list').innerHTML = summaries.map((summary, index) => {
+      const key = repeatKey(summary);
+      const warning = existing.has(key) ? 'Already in this day’s log' : seen.has(key) ? 'Repeated in this paste' : '';
+      seen.add(key);
+      return `<div class="paste-entry"><label class="paste-select"><input type="checkbox" ${warning ? '' : 'checked'} aria-controls="paste-text-${index}">Include update ${index + 1}</label>${warning ? `<p class="paste-repeat small">${warning} — unchecked. Select it if this is separate work.</p>` : ''}<label class="sr-only" for="paste-text-${index}">Update ${index + 1} text</label><textarea id="paste-text-${index}" rows="${Math.min(8, Math.max(3, summary.split('\n').length))}" maxlength="12000">${esc(summary)}</textarea></div>`;
+    }).join('');
+    updatePasteButton();
+    $('paste-dialog').showModal();
   } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
 }
 function openQuickEdit(task) {
@@ -313,7 +355,32 @@ $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
 $('add-task').addEventListener('click', () => openTask(nextTask()));
 $('quick-notes').addEventListener('input', () => { day().quickDraft = $('quick-notes').value; persist(); updateQuickButton(); });
+for (const id of ['quick-mode', 'quick-table-headers']) $(id).addEventListener('change', () => {
+  day().quickMode = $('quick-mode').value;
+  day().quickTableHeaders = $('quick-table-headers').checked;
+  persist(); updateQuickButton();
+});
+$('quick-notes').addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.isComposing) {
+    event.preventDefault();
+    if (!$('save-quick').disabled) $('quick-form').requestSubmit();
+  }
+});
 $('quick-form').addEventListener('submit', addQuickUpdates);
+for (const id of ['close-paste', 'cancel-paste']) $(id).addEventListener('click', () => $('paste-dialog').close());
+$('paste-list').addEventListener('input', event => {
+  updatePasteButton();
+  if (event.target.matches('textarea')) event.target.closest('.paste-entry').querySelector('.paste-repeat')?.remove();
+});
+$('paste-form').addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    const summaries = [...$('paste-list').querySelectorAll('.paste-entry')].filter(row => row.querySelector('input').checked).map(row => row.querySelector('textarea').value);
+    if (!summaries.length) return;
+    saveQuickUpdates(summaries);
+    $('paste-dialog').close();
+  } catch (error) { $('paste-error').textContent = error.message; $('paste-error').hidden = false; }
+});
 for (const id of ['close-quick', 'cancel-quick']) $(id).addEventListener('click', () => $('quick-dialog').close());
 $('quick-edit-form').addEventListener('submit', event => {
   event.preventDefault();

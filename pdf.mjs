@@ -1,4 +1,4 @@
-import { reportData } from './model.mjs?v=3';
+import { reportData } from './model.mjs?v=3.2';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.

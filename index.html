@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.1">
+  <link rel="stylesheet" href="styles.css?v=3.2">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.1"></script>
+  <script type="module" src="app.mjs?v=3.2"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -46,9 +46,10 @@
       <section class="work-section" aria-labelledby="tasks-title">
         <div class="section-heading"><div><h2 id="tasks-title">Quick production log</h2><p class="muted small">Just the reference and what got done. Keep the full details in your tickets.</p></div></div>
         <form id="quick-form" class="quick-composer">
+          <div class="paste-setup"><label for="quick-mode">How should this paste be grouped?<select id="quick-mode"><option value="lines">One update per line</option><option value="single">One whole ticket / note</option><option value="blocks">Separate by blank lines</option><option value="table">Spreadsheet rows (tabs)</option></select></label><label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label></div>
           <label for="quick-notes">What did you get done?</label>
           <textarea id="quick-notes" rows="4" maxlength="12000" placeholder="INC-204 — restored link; complete&#10;Row A — pulled 4 bundles; 2 remaining" aria-describedby="quick-help"></textarea>
-          <div class="quick-footer"><p id="quick-help" class="small muted">One update per line. Type, dictate, or paste several at once.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
+          <div class="quick-footer"><p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update. Use Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
           <p id="quick-error" class="small danger-text" role="alert" hidden></p>
         </form>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
@@ -94,6 +95,8 @@
   <div id="toast" role="status" class="toast" hidden></div>
 
   <dialog id="quick-dialog" aria-labelledby="quick-dialog-title"><form id="quick-edit-form"><header class="dialog-header"><h2 id="quick-dialog-title">Edit update</h2><button id="close-quick" type="button" class="icon-button" aria-label="Close update editor">×</button></header><div class="dialog-body"><label>Production update<textarea id="quick-edit-text" rows="5" maxlength="12000" required></textarea></label><p class="muted small">Keep just the reference, result, and anything still needed.</p><p id="quick-edit-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-quick" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save update</button></footer></form></dialog>
+
+  <dialog id="paste-dialog" aria-labelledby="paste-title"><form id="paste-form"><header class="dialog-header"><h2 id="paste-title">Review pasted updates</h2><button id="close-paste" type="button" class="icon-button" aria-label="Close paste review">×</button></header><div class="dialog-body"><p class="small muted">Keep the reference, work completed, and anything still needed. Edit the text or uncheck entries you don’t want in the report. Exact repeats start unchecked.</p><div id="paste-list"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-paste" type="button" class="button secondary">Back to paste</button><button id="save-paste" type="submit" class="button primary">Add selected updates</button></footer></form></dialog>
 
   <dialog id="task-dialog" aria-labelledby="dialog-title">
     <form id="task-form">
