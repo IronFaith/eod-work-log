@@ -2,7 +2,7 @@
 
 A small static website for recording daily work and preparing an end-of-day report for Teams.
 
-- **Today:** enter a ticket or task title and an optional description. A title alone is enough; include results, quantities, blockers, or next steps only when useful. Ctrl+Enter or Cmd+Enter adds the update. Unadded titles and descriptions are saved as a draft. **Paste several updates or spreadsheet rows** groups and reviews batches; exact repeats start unchecked but can be included when they represent separate work. No row, ticket description, or status is required or inferred. Detailed entries and cable breakdowns remain available under an optional disclosure.
+- **Today:** one visible workspace, with **Paste tasks & updates** and **Add one update** alongside each other on desktop and stacked on smaller screens. Paste existing notes or spreadsheet cells and choose one of four visible grouping options. Review batches before adding; exact repeats start unchecked but can be included when they represent separate work. For one update, a ticket or task title is enough, with an optional description. Ctrl+Enter or Cmd+Enter continues either form. Unadded notes and titles/descriptions are saved as drafts. No row, ticket description, or status is required or inferred. Detailed entries and cable breakdowns remain available under an optional disclosure.
 - **Report:** review a compact production table and share or download its PDF from the main report card. Acting lead appears only when a name is entered; crew names remain visible. The card shows the report date, update count, and Draft/Ready status. Missing details link back to the log. Full ticket descriptions and text-copy methods remain under **Report options & text copy**; older records retain all their fields.
 - **History:** reopen days and export/import JSON backups. Imports keep existing dates and add missing dates.
 
@@ -10,7 +10,7 @@ The public repository contains only the app and synthetic test fixtures. It does
 
 ## Paste from your computer
 
-For one update, paste or type into **Title / ticket** and add a description if useful. To import several updates, open **Paste several updates or spreadsheet rows**, then paste into **Paste your updates** with Ctrl+V (Windows) or Cmd+V (Mac). Choose the grouping that fits:
+Paste into **Paste your updates** with Ctrl+V (Windows) or Cmd+V (Mac). The paste box and all four grouping options are always visible. Choose the grouping that fits:
 
 - **One update per line:** for short production lists. A single new line adds immediately; batches open a review first.
 - **One whole ticket / note:** keeps a multiline ticket together. Trim the original request down to the reference and result during review.
@@ -18,6 +18,8 @@ For one update, paste or type into **Title / ticket** and add a description if u
 - **Spreadsheet rows (tabs):** for cells copied from Excel or another tab-separated table. Set **First row contains column names** to match what you copied. Quoted multiline cells are preserved. Unquoted line breaks are separate rows.
 
 Use Ctrl+Enter or Cmd+Enter in the paste box to continue. In the review, edit or uncheck entries, then **Add N updates**. Back to paste keeps the original draft. Saving adds only checked entries and clears the paste box. Duplicate detection compares exact update text in the current day and pasted batch; it does not match ticket IDs or infer whether similar work is the same task. The app groups text locally; it does not automatically summarize ticket descriptions or invent completion statuses.
+
+To write one update yourself, use **Title / ticket** in the adjacent **Add one update** form. Add a description if useful. Both forms add to the same daily log; you only need to use one for each piece of work.
 
 Download the PDF directly on your computer when finished. Saved days do not sync automatically to an iPhone; use History → Export backup / Import backup to transfer saved days if needed. Imports add missing dates and keep existing dates.
 
@@ -29,7 +31,7 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy alternate format** writes both HTML and plain text through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 3.3 reads existing schema 1, 2, and 3 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 4 to retain title-only updates and title/description drafts. Older app versions cannot read schema 4 backups.
+Version 3.4 reads existing schema 1, 2, and 3 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 4 to retain title-only updates and title/description drafts. Older app versions cannot read schema 4 backups.
 
 An internet connection is needed to launch the app. There is no service worker or offline-launch support. Storage is tied to this website and browser context; it is not encrypted cloud storage or automatic iCloud sync. Clearing browser data can remove reports. Keep periodic backup exports in a private location such as Files or iCloud Drive. Do not commit backups to this repository.
 

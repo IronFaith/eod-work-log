@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.3">
+  <link rel="stylesheet" href="styles.css?v=3.4">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.3"></script>
+  <script type="module" src="app.mjs?v=3.4"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -44,8 +44,29 @@
       </details>
 
       <section class="work-section" aria-labelledby="tasks-title">
-        <div class="section-heading"><div><h2 id="tasks-title">Add an update</h2><p class="muted small">A ticket or task title is enough. Add a description only when it helps.</p></div></div>
-        <form id="update-form" class="quick-composer">
+        <div class="section-heading"><div><h2 id="tasks-title">Log your work</h2><p class="muted small">Paste from your tickets or add a short update. Everything goes into the same daily log.</p></div></div>
+        <div class="entry-workspace">
+        <form id="quick-form" class="quick-composer paste-composer" aria-labelledby="paste-heading">
+          <h3 id="paste-heading">Paste tasks &amp; updates</h3>
+          <p class="small muted composer-intro">Copy the notes or cells you already have. Paste, choose how to group them, then review.</p>
+          <label for="quick-notes">Paste your updates</label>
+          <textarea id="quick-notes" rows="6" maxlength="12000" placeholder="INC-204 — restored link; complete&#10;Row A — pulled 4 bundles; 2 remaining" aria-describedby="quick-help"></textarea>
+          <div class="paste-setup">
+            <fieldset id="quick-mode" class="paste-modes"><legend>How should this paste be grouped?</legend>
+              <label><input type="radio" name="quick-mode" value="lines" checked><span>One update per line</span></label>
+              <label><input type="radio" name="quick-mode" value="single"><span>One whole ticket / note</span></label>
+              <label><input type="radio" name="quick-mode" value="blocks"><span>Separate by blank lines</span></label>
+              <label><input type="radio" name="quick-mode" value="table"><span>Spreadsheet rows (tabs)</span></label>
+            </fieldset>
+            <label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label>
+          </div>
+          <p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update.</p>
+          <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
+          <p id="quick-error" class="small danger-text" role="alert" hidden></p>
+        </form>
+        <form id="update-form" class="quick-composer single-composer" aria-labelledby="single-heading">
+          <h3 id="single-heading">Add one update</h3>
+          <p class="small muted composer-intro">A title is enough. Add a description only when it helps.</p>
           <label for="update-title">Title / ticket</label>
           <input id="update-title" maxlength="200" placeholder="INC-204 — Restore rack connection" aria-describedby="update-title-help" required>
           <p id="update-title-help" class="small muted field-help">Use a ticket title or a task like “Pull fiber — Row A”.</p>
@@ -55,15 +76,7 @@
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
           <p id="update-error" class="small danger-text" role="alert" hidden></p>
         </form>
-        <details id="batch-entry" class="detailed-entry"><summary>Paste several updates or spreadsheet rows</summary>
-        <form id="quick-form" class="quick-composer">
-          <div class="paste-setup"><label for="quick-mode">How should this paste be grouped?<select id="quick-mode"><option value="lines">One update per line</option><option value="single">One whole ticket / note</option><option value="blocks">Separate by blank lines</option><option value="table">Spreadsheet rows (tabs)</option></select></label><label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label></div>
-          <label for="quick-notes">Paste your updates</label>
-          <textarea id="quick-notes" rows="4" maxlength="12000" placeholder="INC-204 — restored link; complete&#10;Row A — pulled 4 bundles; 2 remaining" aria-describedby="quick-help"></textarea>
-          <div class="quick-footer"><p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update. Use Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
-          <p id="quick-error" class="small danger-text" role="alert" hidden></p>
-        </form>
-        </details>
+        </div>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
         <p id="task-count" class="muted small log-count"></p>
         <div id="task-list"></div>

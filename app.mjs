@@ -1,5 +1,5 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.3';
-import { buildReportPdf } from './pdf.mjs?v=3.3';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.4';
+import { buildReportPdf } from './pdf.mjs?v=3.4';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -15,7 +15,7 @@ try {
 }
 const day = () => ensureDay(state, activeDate);
 const reportOptions = () => ({ detailed: $('report-detail').checked });
-const quickOptions = () => ({ mode: $('quick-mode').value, headers: $('quick-table-headers').checked });
+const quickOptions = () => ({ mode: document.querySelector('[name="quick-mode"]:checked').value, headers: $('quick-table-headers').checked });
 const repeatKey = text => text.replace(/\r\n|\r/g, '\n').trim();
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
 function toast(message) {
@@ -61,8 +61,7 @@ function fillDay() {
   $('update-description').value = day().updateDescriptionDraft;
   updateTitleButton();
   $('quick-notes').value = day().quickDraft;
-  $('batch-entry').open = !!day().quickDraft;
-  $('quick-mode').value = day().quickMode;
+  document.querySelectorAll('[name="quick-mode"]').forEach(input => { input.checked = input.value === day().quickMode; });
   $('quick-table-headers').checked = day().quickTableHeaders;
   updateQuickButton();
   summary();
@@ -109,7 +108,7 @@ function updateQuickButton() {
     blocks: 'Leave a blank line between tickets or notes. Lines within each block stay together.',
     table: 'Copy cells from Excel or a tab-separated table. Each row becomes an update. Check whether you copied column names.'
   };
-  $('quick-help').textContent = `${tips[mode]} Use Ctrl+Enter or Cmd+Enter to continue.`;
+  $('quick-help').textContent = tips[mode];
   $('quick-error').hidden = true;
   try {
     const count = splitQuickNotes($('quick-notes').value, quickOptions()).length;
@@ -380,7 +379,7 @@ $('review-details').addEventListener('click', () => {
   showTab('today');
   $('shift-details').open = true;
   if (day().updateTitleDraft.trim() || day().updateDescriptionDraft.trim()) $('update-title').focus();
-  else if (day().quickDraft?.trim()) { $('batch-entry').open = true; $('quick-notes').focus(); }
+  else if (day().quickDraft?.trim()) $('quick-notes').focus();
 });
 $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab('today'); });
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
@@ -397,7 +396,7 @@ for (const [id, field] of [['update-title', 'updateTitleDraft'], ['update-descri
 }
 $('quick-notes').addEventListener('input', () => { day().quickDraft = $('quick-notes').value; persist(); updateQuickButton(); });
 for (const id of ['quick-mode', 'quick-table-headers']) $(id).addEventListener('change', () => {
-  day().quickMode = $('quick-mode').value;
+  day().quickMode = quickOptions().mode;
   day().quickTableHeaders = $('quick-table-headers').checked;
   persist(); updateQuickButton();
 });
