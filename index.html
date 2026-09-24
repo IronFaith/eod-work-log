@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.4">
+  <link rel="stylesheet" href="styles.css?v=3.5">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.4"></script>
+  <script type="module" src="app.mjs?v=3.5"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -64,6 +64,13 @@
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
           <p id="quick-error" class="small danger-text" role="alert" hidden></p>
         </form>
+        <div class="entry-side">
+        <section id="paste-review" class="quick-composer" aria-labelledby="paste-title" hidden>
+          <h3 id="paste-title">Review pasted updates</h3>
+          <p class="small muted composer-intro">The first line is suggested as the title. Edit the result below, then add or update your log.</p>
+          <p id="paste-stale" class="notice" hidden>Your paste or grouping changed. Use Refresh review to replace these suggestions with the new paste. This also replaces your review edits.</p>
+          <form id="paste-form"><div id="paste-list"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><button id="cancel-paste" type="button" class="text-button">Keep draft &amp; close</button><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
+        </section>
         <form id="update-form" class="quick-composer single-composer" aria-labelledby="single-heading">
           <h3 id="single-heading">Add one update</h3>
           <p class="small muted composer-intro">A title is enough. Add a description only when it helps.</p>
@@ -76,6 +83,7 @@
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
           <p id="update-error" class="small danger-text" role="alert" hidden></p>
         </form>
+        </div>
         </div>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
         <p id="task-count" class="muted small log-count"></p>
@@ -120,8 +128,6 @@
   <div id="toast" role="status" class="toast" hidden></div>
 
   <dialog id="quick-dialog" aria-labelledby="quick-dialog-title"><form id="quick-edit-form"><header class="dialog-header"><h2 id="quick-dialog-title">Edit update</h2><button id="close-quick" type="button" class="icon-button" aria-label="Close update editor">×</button></header><div class="dialog-body"><label id="quick-edit-title-label" hidden>Title / ticket<input id="quick-edit-title" maxlength="200"></label><label id="quick-edit-label" for="quick-edit-text">Production update</label><textarea id="quick-edit-text" rows="5" maxlength="12000" required></textarea><p class="muted small">Keep just the reference, result, and anything still needed.</p><p id="quick-edit-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-quick" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save update</button></footer></form></dialog>
-
-  <dialog id="paste-dialog" aria-labelledby="paste-title"><form id="paste-form"><header class="dialog-header"><h2 id="paste-title">Review pasted updates</h2><button id="close-paste" type="button" class="icon-button" aria-label="Close paste review">×</button></header><div class="dialog-body"><p class="small muted">Keep the reference, work completed, and anything still needed. Edit the text or uncheck entries you don’t want in the report. Exact repeats start unchecked.</p><div id="paste-list"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-paste" type="button" class="button secondary">Back to paste</button><button id="save-paste" type="submit" class="button primary">Add selected updates</button></footer></form></dialog>
 
   <dialog id="task-dialog" aria-labelledby="dialog-title">
     <form id="task-form">

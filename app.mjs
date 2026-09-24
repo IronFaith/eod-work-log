@@ -1,5 +1,5 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.4';
-import { buildReportPdf } from './pdf.mjs?v=3.4';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.5';
+import { buildReportPdf } from './pdf.mjs?v=3.5';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -16,7 +16,6 @@ try {
 const day = () => ensureDay(state, activeDate);
 const reportOptions = () => ({ detailed: $('report-detail').checked });
 const quickOptions = () => ({ mode: document.querySelector('[name="quick-mode"]:checked').value, headers: $('quick-table-headers').checked });
-const repeatKey = text => text.replace(/\r\n|\r/g, '\n').trim();
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
 function toast(message) {
   $('toast').textContent = message;
@@ -77,6 +76,7 @@ function renderTasks() {
     const context = [task.ticketId ? `Ticket ${task.ticketId}` : task.entryType === 'ticket' ? 'Ticket' : task.entryType === 'general' ? 'General work' : 'Field work', task.area].filter(Boolean).join(' · ');
     return `<article class="task-card ${statusClass}"><div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div><span class="status ${statusClass}">${esc(task.status)}</span></div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete ${esc(taskName(task))}">Delete</button></div></article>`;
   }).join('') : '';
+  renderPasteReview();
 }
 function updateTitleButton() {
   $('save-update').disabled = !$('update-title').value.trim();
@@ -112,8 +112,8 @@ function updateQuickButton() {
   $('quick-error').hidden = true;
   try {
     const count = splitQuickNotes($('quick-notes').value, quickOptions()).length;
-    $('save-quick').disabled = !count;
-    $('save-quick').textContent = count > 1 ? `Review ${count} updates` : mode !== 'lines' ? 'Review update' : 'Add to log';
+    $('save-quick').disabled = !count && !day().pasteReview;
+    $('save-quick').textContent = !count && day().pasteReview ? 'Clear review' : day().pasteReview && !reviewIsCurrent() ? 'Refresh review' : count > 1 ? `Review ${count} updates` : 'Review update';
     if (!count && mode === 'table' && $('quick-notes').value.trim() && $('quick-table-headers').checked) $('quick-help').textContent = 'Only a header row was found. If you copied a data row without column names, uncheck First row contains column names.';
   } catch (error) {
     $('save-quick').disabled = true;
@@ -121,40 +121,48 @@ function updateQuickButton() {
     $('quick-error').textContent = error.message;
     $('quick-error').hidden = false;
   }
+  updatePasteButton();
 }
-function saveQuickUpdates(summaries) {
-  const tasks = summaries.map(summary => validateTask({ ...nextTask(), entryType: 'quick', summary: summary.trim(), status: '' }));
-  if (day().tasks.length + tasks.length > 1000) throw new Error('Use up to 1,000 entries per day.');
-  day().tasks.push(...tasks);
-  day().quickDraft = '';
-  const saved = persist();
-  $('quick-notes').value = '';
-  updateQuickButton(); renderTasks();
-  toast(saved ? `${tasks.length === 1 ? 'Update' : `${tasks.length} updates`} added` : 'Updates added — export a backup to keep them');
+function reviewIsCurrent() {
+  const review = day().pasteReview, options = quickOptions();
+  return review && review.source === day().quickDraft && review.mode === options.mode && review.headers === options.headers;
+}
+function syncReviewDecision(element, index, reset = false) {
+  const row = day().pasteReview.rows[index], matches = ticketMatches(day().tasks, row);
+  const signature = JSON.stringify(matches.map(task => task.id));
+  if (row.action === 'update' && !matches.some(task => task.id === row.targetId)) { row.action = ''; row.targetId = ''; }
+  if (reset && signature !== element.dataset.matches && row.action !== 'skip') { row.action = matches.length ? '' : 'add'; row.targetId = ''; }
+  element.dataset.matches = signature;
+  const choice = row.action === 'update' ? `update:${row.targetId}` : row.action;
+  element.querySelector('[data-field="action"]').innerHTML = `${matches.length || !row.action ? '<option value="">Choose how to save</option>' : ''}<option value="add">${matches.length ? 'Add separate work' : 'Add new update'}</option>${matches.map(task => `<option value="update:${esc(task.id)}">Update entry ${day().tasks.indexOf(task) + 1}: ${esc(taskName(task).slice(0, 100))}</option>`).join('')}<option value="skip">Skip this update</option>`;
+  element.querySelector('[data-field="action"]').value = choice;
+  element.querySelector('[data-field="title"]').required = row.action !== 'skip';
+  element.querySelector('.paste-match').textContent = matches.length ? `${matches.length === 1 ? 'Ticket already in today’s log.' : 'Several entries use this ticket.'} Updating replaces its title and progress; original request, quantities, and status stay as saved.` : row.action === 'skip' ? 'Skipped. Choose Add new update if this is separate work.' : '';
+  element.querySelector('.paste-current').textContent = matches.map(task => `Entry ${day().tasks.indexOf(task) + 1}: ${taskSummary(task).slice(0, 350)}${taskSummary(task).length > 350 ? '…' : ''}`).join('\n\n');
+}
+function renderPasteReview() {
+  const review = day().pasteReview;
+  $('paste-review').hidden = !review?.rows.length;
+  if (!review?.rows.length) { $('paste-list').innerHTML = ''; return; }
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><h4>Update ${index + 1}</h4><label>Title / ticket<input data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-field="summary" aria-label="Update ${index + 1} description" rows="3" maxlength="12000">${esc(row.summary)}</textarea></label><p class="paste-match small"></p><p class="paste-current small muted"></p><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div>`).join('');
+  [...$('paste-list').children].forEach((element, index) => syncReviewDecision(element, index));
+  updatePasteButton();
 }
 function updatePasteButton() {
-  const count = $('paste-list').querySelectorAll('input:checked').length;
-  $('save-paste').disabled = !count;
-  $('save-paste').textContent = count ? `Add ${count} ${count === 1 ? 'update' : 'updates'}` : 'Select updates to add';
+  const rows = day().pasteReview?.rows || [], count = rows.filter(row => ['add', 'update'].includes(row.action)).length;
+  const undecided = rows.some(row => !row.action), stale = !!rows.length && !reviewIsCurrent();
+  $('paste-stale').hidden = !stale;
+  $('save-paste').disabled = !rows.length || undecided || stale;
+  $('save-paste').textContent = undecided ? 'Choose ticket actions' : count ? `Save ${count} ${count === 1 ? 'update' : 'updates'}` : 'Finish without adding';
   $('paste-error').hidden = true;
 }
 function addQuickUpdates(event) {
   event.preventDefault();
   try {
-    const summaries = splitQuickNotes($('quick-notes').value, quickOptions());
-    if (!summaries.length) return;
-    if (summaries.length > 1000) throw new Error('Review up to 1,000 updates at a time.');
-    const existing = new Set(day().tasks.map(task => repeatKey(taskSummary(task))));
-    if (summaries.length === 1 && quickOptions().mode === 'lines' && !existing.has(repeatKey(summaries[0]))) return saveQuickUpdates(summaries);
-    const seen = new Set();
-    $('paste-list').innerHTML = summaries.map((summary, index) => {
-      const key = repeatKey(summary);
-      const warning = existing.has(key) ? 'Already in this day’s log' : seen.has(key) ? 'Repeated in this paste' : '';
-      seen.add(key);
-      return `<div class="paste-entry"><label class="paste-select"><input type="checkbox" ${warning ? '' : 'checked'} aria-controls="paste-text-${index}">Include update ${index + 1}</label>${warning ? `<p class="paste-repeat small">${warning} — unchecked. Select it if this is separate work.</p>` : ''}<label class="sr-only" for="paste-text-${index}">Update ${index + 1} text</label><textarea id="paste-text-${index}" rows="${Math.min(8, Math.max(3, summary.split('\n').length))}" maxlength="12000">${esc(summary)}</textarea></div>`;
-    }).join('');
-    updatePasteButton();
-    $('paste-dialog').showModal();
+    if (!reviewIsCurrent()) day().pasteReview = createPasteReview(day().tasks, $('quick-notes').value, quickOptions());
+    if (!day().pasteReview.rows.length) day().pasteReview = null;
+    persist(); renderPasteReview(); updateQuickButton();
+    $('paste-list').querySelector('input')?.focus();
   } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
 }
 function openQuickEdit(task) {
@@ -182,7 +190,7 @@ function renderReportView() {
   $('share-status').hidden = true;
 }
 function renderHistory() {
-  const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.updateTitleDraft || value.updateDescriptionDraft || value.quickDraft || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
+  const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.updateTitleDraft || value.updateDescriptionDraft || value.quickDraft || value.pasteReview?.rows.length || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
   $('history-list').innerHTML = days.length ? days.map(value => `<button class="history-item" data-date="${esc(value.date)}"><span><strong>${esc(dateLabel(value.date))}</strong><span class="small muted">${esc(value.header.location || 'Location not recorded')} · ${value.tasks.length} ${value.tasks.length === 1 ? 'task' : 'tasks'}</span></span><span class="chevron" aria-hidden="true">›</span></button>`).join('') : '<div class="empty-state"><h3>Your saved days will appear here</h3><p>Start recording work in Today. You can return to any saved day here.</p></div>';
 }
 function showTab(tab, scroll = true) {
@@ -398,6 +406,7 @@ $('quick-notes').addEventListener('input', () => { day().quickDraft = $('quick-n
 for (const id of ['quick-mode', 'quick-table-headers']) $(id).addEventListener('change', () => {
   day().quickMode = quickOptions().mode;
   day().quickTableHeaders = $('quick-table-headers').checked;
+  state.pastePreferences = quickOptions();
   persist(); updateQuickButton();
 });
 $('quick-notes').addEventListener('keydown', event => {
@@ -407,18 +416,32 @@ $('quick-notes').addEventListener('keydown', event => {
   }
 });
 $('quick-form').addEventListener('submit', addQuickUpdates);
-for (const id of ['close-paste', 'cancel-paste']) $(id).addEventListener('click', () => $('paste-dialog').close());
+$('cancel-paste').addEventListener('click', () => { $('paste-review').hidden = true; $('quick-notes').focus(); });
 $('paste-list').addEventListener('input', event => {
-  updatePasteButton();
-  if (event.target.matches('textarea')) event.target.closest('.paste-entry').querySelector('.paste-repeat')?.remove();
+  const element = event.target.closest('[data-review-index]');
+  if (!element) return;
+  const index = Number(element.dataset.reviewIndex), row = day().pasteReview.rows[index], field = event.target.dataset.field;
+  if (field === 'action') {
+    row.action = event.target.value.startsWith('update:') ? 'update' : event.target.value;
+    row.targetId = row.action === 'update' ? event.target.value.slice(7) : '';
+  } else if (field === 'title' || field === 'summary') row[field] = event.target.value;
+  syncReviewDecision(element, index, field === 'title');
+  persist(); updatePasteButton();
 });
 $('paste-form').addEventListener('submit', event => {
   event.preventDefault();
   try {
-    const summaries = [...$('paste-list').querySelectorAll('.paste-entry')].filter(row => row.querySelector('input').checked).map(row => row.querySelector('textarea').value);
-    if (!summaries.length) return;
-    saveQuickUpdates(summaries);
-    $('paste-dialog').close();
+    if (!reviewIsCurrent()) throw new Error('The pasted text or grouping changed. Refresh the review first.');
+    const rows = day().pasteReview.rows;
+    if (!rows.length) return;
+    day().tasks = applyPasteReview(day().tasks, rows);
+    const added = rows.filter(row => row.action === 'add').length, updated = rows.filter(row => row.action === 'update').length;
+    day().quickDraft = ''; day().pasteReview = null;
+    const saved = persist();
+    $('quick-notes').value = '';
+    updateQuickButton(); renderTasks();
+    $('quick-notes').focus();
+    toast(saved ? `${added} added · ${updated} updated` : 'Log changed — export a backup to keep it');
   } catch (error) { $('paste-error').textContent = error.message; $('paste-error').hidden = false; }
 });
 for (const id of ['close-quick', 'cancel-quick']) $(id).addEventListener('click', () => $('quick-dialog').close());

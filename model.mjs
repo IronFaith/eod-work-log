@@ -14,11 +14,11 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 4, defaults: blankHeader(), days: {} }; }
+export function newState() { return { schema: 5, defaults: blankHeader(), pastePreferences: null, days: {} }; }
 export function ensureDay(state, date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!Object.hasOwn(state.days, date)) state.days[date] = {
-    date, header: { ...state.defaults }, tasks: [], updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', quickMode: 'lines', quickTableHeaders: true, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
+    date, header: { ...state.defaults }, tasks: [], updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
   };
   return state.days[date];
 }
@@ -79,6 +79,51 @@ export function taskSummary(task) {
   const identity = [taskName(task), task.ticketId, task.area].filter(Boolean).join(' · ');
   return [identity, taskDetails(task, { detailed: false })].filter(Boolean).join('\n');
 }
+function ticketKey(task) {
+  const identity = task.ticketId || task.title || (task.summary || '').split('\n')[0];
+  const refs = identity.match(/\b(?:INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)[ -]?\d+\b|\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi) || [];
+  const keys = [...new Set(refs.filter(ref => !/^(ROW|RACK|ROOM)-/i.test(ref)).map(ref => ref.toUpperCase().replace(/[ -]/g, '')))];
+  return keys.length === 1 ? keys[0] : '';
+}
+export function ticketMatches(tasks, update) {
+  const key = ticketKey(update);
+  return key ? tasks.filter(task => ticketKey(task) === key) : [];
+}
+export function createPasteReview(tasks, source, { mode = 'lines', headers = false } = {}) {
+  const summaries = splitQuickNotes(source, { mode, headers });
+  if (summaries.length > 1000) throw new Error('Review up to 1,000 updates at a time.');
+  const seen = new Set(), existing = new Set(tasks.map(task => taskSummary(task).trim()));
+  const rows = summaries.map(text => {
+    const [first, ...rest] = text.split('\n');
+    const row = { title: first.length <= 200 ? first : '', summary: first.length <= 200 ? rest.join('\n').trim() : text, action: 'add', targetId: '' };
+    const key = ticketKey(row) || text;
+    if (existing.has(text) || seen.has(key)) row.action = 'skip';
+    else if (ticketMatches(tasks, row).length) row.action = '';
+    seen.add(key);
+    return row;
+  });
+  return { source, mode, headers, rows };
+}
+export function applyPasteReview(tasks, rows) {
+  const result = [...tasks], updated = new Set();
+  for (const row of rows) {
+    if (row.action === 'skip') continue;
+    if (!['add', 'update'].includes(row.action)) throw new Error('Choose how to save each matching ticket.');
+    if (!row.title.trim()) throw new Error('Add a short title for each included update.');
+    const title = row.title.trim(), summary = row.summary.trim();
+    if (row.action === 'add') result.push(validateTask({ ...nextTask(), entryType: 'quick', title, summary, status: '' }));
+    else {
+      const index = tasks.findIndex(task => task.id === row.targetId);
+      if (index < 0 || !ticketMatches(tasks, row).some(task => task.id === row.targetId)) throw new Error('The selected entry no longer matches this ticket. Review your choice.');
+      if (updated.has(row.targetId)) throw new Error('Update each existing entry only once per batch. Skip or add the other update separately.');
+      updated.add(row.targetId);
+      const original = tasks[index];
+      result[index] = validateTask({ ...original, title, ...(original.entryType === 'quick' ? { summary } : { notes: summary }) });
+    }
+  }
+  if (result.length > 1000) throw new Error('Use up to 1,000 entries per day.');
+  return result;
+}
 export function reportWarnings(day) {
   const warnings = [];
   if (!day.header.start || !day.header.end) warnings.push('Add shift start and end times.');
@@ -87,7 +132,7 @@ export function reportWarnings(day) {
   if (!day.header.crew.trim()) warnings.push('Add your crew.');
   if (!day.tasks.length) warnings.push('Add at least one task.');
   if (day.updateTitleDraft?.trim() || day.updateDescriptionDraft?.trim()) warnings.push('Add your draft update to the log before sharing.');
-  if (day.quickDraft?.trim()) warnings.push('Add your quick notes to the log before sharing.');
+  if (day.quickDraft?.trim() || day.pasteReview?.rows.length) warnings.push('Add your quick notes to the log before sharing.');
   if (day.blockerState === 'Not reviewed') warnings.push('Review blockers: choose None or Reported.');
   if (day.blockerState === 'Reported' && !day.blockers.trim()) warnings.push('Describe the reported blocker.');
   return warnings;
@@ -127,6 +172,14 @@ function textField(value, limit = 12000) {
   if (typeof value !== 'string' || value.length > limit) throw new Error('This backup contains an invalid text field.');
   return value;
 }
+function reviewFrom(value) {
+  if (value == null) return null;
+  if (!isObject(value) || !QUICK_MODES.includes(value.mode) || typeof value.headers !== 'boolean' || !Array.isArray(value.rows) || value.rows.length > 1000) throw new Error('This backup has an invalid paste review.');
+  return { source: textField(value.source), mode: value.mode, headers: value.headers, rows: value.rows.map(row => {
+    if (!isObject(row) || !['', 'add', 'skip', 'update'].includes(row.action)) throw new Error('This backup has an invalid review choice.');
+    return { title: textField(row.title, 200), summary: textField(row.summary), action: row.action, targetId: textField(row.targetId, 100) };
+  }) };
+}
 function headerFrom(value) {
   if (!isObject(value)) throw new Error('This backup has invalid shift details.');
   const header = Object.fromEntries(HEADER_KEYS.map(key => [key, textField(value[key])]));
@@ -161,25 +214,29 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
+  if (raw.pastePreferences != null) {
+    if (!isObject(raw.pastePreferences) || !QUICK_MODES.includes(raw.pastePreferences.mode) || typeof raw.pastePreferences.headers !== 'boolean') throw new Error('This backup has invalid paste preferences.');
+    state.pastePreferences = { mode: raw.pastePreferences.mode, headers: raw.pastePreferences.headers };
+  }
   for (const [date, value] of Object.entries(raw.days)) {
     if (!validDate(date) || !isObject(value) || value.date !== date || !Array.isArray(value.tasks) || value.tasks.length > 1000 || !['None', 'Reported', 'Not reviewed'].includes(value.blockerState)) throw new Error('This backup contains an invalid day.');
     const tasks = value.tasks.map(validateTask);
     if (new Set(tasks.map(task => task.id)).size !== tasks.length) throw new Error('This backup contains duplicate task IDs.');
-    state.days[date] = { date, header: headerFrom(value.header), tasks, updateTitleDraft: textField(value.updateTitleDraft, 200), updateDescriptionDraft: textField(value.updateDescriptionDraft), quickDraft: textField(value.quickDraft), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
+    state.days[date] = { date, header: headerFrom(value.header), tasks, updateTitleDraft: textField(value.updateTitleDraft, 200), updateDescriptionDraft: textField(value.updateDescriptionDraft), quickDraft: textField(value.quickDraft), pasteReview: reviewFrom(value.pasteReview), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
   }
   return state;
 }
 export const exportBackup = state => JSON.stringify(state, null, 2);
 export function hasDayContent(day, defaults) {
-  return Boolean(day.updatedAt || day.tasks.length || day.updateTitleDraft || day.updateDescriptionDraft || day.quickDraft || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
+  return Boolean(day.updatedAt || day.tasks.length || day.updateTitleDraft || day.updateDescriptionDraft || day.quickDraft || day.pasteReview?.rows.length || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
 }
 export function mergeBackup(current, incoming) {
   const days = { ...incoming.days };
   for (const [date, day] of Object.entries(current.days)) {
     if (!Object.hasOwn(days, date) || hasDayContent(day, current.defaults)) days[date] = day;
   }
-  return { schema: 4, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, days };
+  return { schema: 5, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, pastePreferences: current.pastePreferences || incoming.pastePreferences || null, days };
 }
