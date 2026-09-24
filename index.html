@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=3.1">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3"></script>
+  <script type="module" src="app.mjs?v=3.1"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -66,13 +66,17 @@
     </section>
 
     <section id="report-panel" aria-label="Report" hidden>
-      <div class="section-heading"><div><h2>Ready for your supervisor</h2><p class="muted small">Review your report, then choose how to share it.</p></div></div>
-      <div id="report-checks" class="notice" hidden></div>
-      <label class="report-option"><input id="report-detail" type="checkbox">Include full ticket descriptions and detail columns</label>
-      <div class="copy-actions"><button id="copy-table" class="button primary">Copy table</button><button id="copy-plain" class="button secondary">Copy readable text</button></div>
-      <p class="muted small copy-note">Copy table uses the displayed report. Paste into Teams and check the table borders before sending.</p>
-      <details class="sharing-options"><summary>More copy &amp; sharing options</summary><div class="copy-actions"><button id="select-report" class="button secondary">Select report</button><button id="copy-rich" class="button secondary">Copy alternate format</button><button id="share-pdf" class="button secondary" hidden>Share PDF</button><button id="download-pdf" class="button secondary">Download PDF</button></div><p class="small muted">If Teams drops the tables, try Select report and your device’s Copy command. A PDF attachment keeps the layout.</p></details>
-      <p id="share-status" class="notice" role="status" hidden></p>
+      <div class="section-heading"><div><h2>Review &amp; share your EOD</h2><p class="muted small">Your logged updates, ready for your supervisor.</p></div></div>
+      <div id="report-checks" class="notice" hidden><div id="report-warnings"></div><button id="review-details" class="text-button">Review missing details</button></div>
+      <section class="pdf-share-card" aria-label="Share your PDF report">
+        <div class="pdf-file"><span class="pdf-icon" aria-hidden="true">PDF</span><div><strong id="pdf-filename"></strong><p id="pdf-summary" class="small muted"></p></div><span id="pdf-readiness" class="status"></span></div>
+        <p class="small pdf-description">Tables, production updates, and blockers, using the notes you already logged.</p>
+        <div class="copy-actions"><button id="share-pdf" class="button primary" hidden>Share PDF</button><button id="download-pdf" class="button secondary">Download PDF</button></div>
+        <p id="pdf-help" class="small muted pdf-help">Download the PDF, then open Teams and tap + → Attach to choose it from Files or Downloads.</p>
+        <p id="share-status" class="notice" role="status" hidden></p>
+      </section>
+      <details class="sharing-options"><summary>Report options &amp; text copy</summary><label class="report-option"><input id="report-detail" type="checkbox">Include full ticket descriptions and detail columns</label><div class="copy-actions"><button id="copy-plain" class="button secondary">Copy readable text</button><button id="copy-table" class="button secondary">Copy table</button><button id="select-report" class="button secondary">Select report</button><button id="copy-rich" class="button secondary">Copy alternate format</button></div><p class="small muted">Text copying is optional. Teams on iPhone may remove pasted table formatting; the PDF keeps its layout.</p></details>
+      <div class="preview-heading"><h3>Report preview</h3><button class="text-button" data-tab="today">Edit log</button></div>
       <div id="report-preview" class="report-paper" tabindex="0" aria-label="Formatted report"></div>
       <div id="manual-copy" class="notice" hidden><label>Copy this report<textarea id="manual-text" rows="10" readonly></textarea></label><p class="small">Automatic copying isn’t available here. Select and copy the text above.</p></div>
     </section>

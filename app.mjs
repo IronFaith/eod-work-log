@@ -2,7 +2,7 @@ import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, ne
 import { buildReportPdf } from './pdf.mjs?v=3';
 
 const $ = id => document.getElementById(id);
-let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer;
+let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) state = parseBackup(saved);
@@ -100,7 +100,11 @@ function openQuickEdit(task) {
 function renderReportView() {
   const warnings = reportWarnings(day());
   $('report-checks').hidden = !warnings.length;
-  $('report-checks').innerHTML = `<strong>A few details still need your review</strong><ul>${warnings.map(warning => `<li>${esc(warning)}</li>`).join('')}</ul><p class="small">Your report is marked Draft until these are filled in.</p>`;
+  $('report-warnings').innerHTML = `<strong>A few details still need your review</strong><ul>${warnings.map(warning => `<li>${esc(warning)}</li>`).join('')}</ul><p class="small">Your PDF is marked Draft until these are filled in.</p>`;
+  $('pdf-filename').textContent = `EOD-${activeDate}.pdf`;
+  $('pdf-summary').textContent = `${day().tasks.length} ${day().tasks.length === 1 ? 'update' : 'updates'} · ${reportOptions().detailed ? 'Full details' : 'Compact report'}`;
+  $('pdf-readiness').textContent = warnings.length ? 'Draft' : 'Ready';
+  $('pdf-readiness').className = `status ${warnings.length ? 'blocked' : 'completed'}`;
   $('report-preview').innerHTML = renderReport(day(), reportOptions()).html;
   $('report-preview').classList.toggle('compact-report', !reportOptions().detailed);
   $('manual-copy').hidden = true;
@@ -244,20 +248,37 @@ function shareStatus(message) {
   $('share-status').hidden = false;
 }
 async function exportPdf(share = false) {
+  if (pdfExporting) return;
+  pdfExporting = true;
+  const button = $(share ? 'share-pdf' : 'download-pdf');
+  const label = button.textContent;
+  button.textContent = share ? 'Opening share…' : 'Creating PDF…';
+  for (const id of ['share-pdf', 'download-pdf']) $(id).disabled = true;
+  $('share-status').hidden = true;
+  let created = false;
   try {
     const doc = buildReportPdf(day(), {}, reportOptions());
     const name = `EOD-${activeDate}.pdf`;
     const blob = doc.output('blob');
     const file = new File([blob], name, { type: 'application/pdf' });
-    if (share && navigator.canShare?.({ files: [file] })) {
+    created = true;
+    const pages = doc.getNumberOfPages();
+    const fileLabel = `${name} · ${pages} ${pages === 1 ? 'page' : 'pages'}`;
+    // Keep PDF generation synchronous so native sharing retains the tap's user activation.
+    if (share && navigator.share && navigator.canShare?.({ files: [file] })) {
       await navigator.share({ files: [file], title: `EOD ${activeDate}` });
-      shareStatus('PDF handed to the share sheet. Review the selected destination before sending.');
+      shareStatus(`${fileLabel}. PDF prepared. Check the selected Teams conversation to confirm it was sent.`);
     } else {
       downloadFile(blob, name, 'application/pdf');
-      shareStatus('PDF download requested. Attach it in Teams to keep the tables. On iPhone, find it in Files → Downloads.');
+      shareStatus(`${fileLabel}. Download requested. In Teams, tap + → Attach and choose the PDF from Files or Downloads.`);
     }
   } catch (error) {
-    if (error.name !== 'AbortError') shareStatus('The PDF could not be created or shared. Try Download PDF again, or copy the report text.');
+    if (error.name === 'AbortError') shareStatus('Sharing closed. You can share again or use Download PDF. Your log has not changed.');
+    else shareStatus(created ? 'Your device could not share the PDF. Use Download PDF, then attach the file in Teams.' : 'The PDF could not be created. Try again, or use Report options & text copy. Your log has not changed.');
+  } finally {
+    pdfExporting = false;
+    button.textContent = label;
+    for (const id of ['share-pdf', 'download-pdf']) $(id).disabled = false;
   }
 }
 async function importFile(file) {
@@ -283,6 +304,11 @@ $('save-defaults').addEventListener('click', () => { state.defaults = { ...day()
 $('report-date').addEventListener('change', event => chooseDate(event.target.value));
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab)));
 $('review-report').addEventListener('click', () => showTab('report'));
+$('review-details').addEventListener('click', () => {
+  showTab('today');
+  $('shift-details').open = true;
+  if (day().quickDraft?.trim()) $('quick-notes').focus();
+});
 $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab('today'); });
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
 $('add-task').addEventListener('click', () => openTask(nextTask()));
@@ -330,6 +356,8 @@ $('select-report').addEventListener('click', () => { selectReport(); shareStatus
 $('report-detail').addEventListener('change', renderReportView);
 $('copy-plain').addEventListener('click', () => copyReport(false));
 $('share-pdf').hidden = !navigator.share || !navigator.canShare;
+if (!$('share-pdf').hidden) $('pdf-help').textContent = 'Tap Share PDF, choose Teams, then select the conversation. If Teams is missing, use Download PDF and attach the file in Teams with + → Attach.';
+else { $('download-pdf').classList.replace('secondary', 'primary'); }
 $('share-pdf').addEventListener('click', () => exportPdf(true));
 $('download-pdf').addEventListener('click', () => exportPdf());
 $('export-backup').addEventListener('click', () => { downloadFile(exportBackup(state), `eod-backup-${localDate()}.json`, 'application/json'); toast('Backup download requested. Keep it in a private folder.'); });
