@@ -1,8 +1,8 @@
-import { reportData } from './model.mjs?v=2';
+import { reportData } from './model.mjs?v=3';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
-export function buildReportPdf(day, libraries = {}) {
+export function buildReportPdf(day, libraries = {}, options = {}) {
   const Pdf = libraries.jsPDF || globalThis.jspdf?.jsPDF;
   if (!Pdf) throw new Error('PDF library is unavailable');
   const doc = new Pdf({ unit: 'mm', format: 'a4', compress: true, putOnlyUsedFonts: true });
@@ -11,7 +11,7 @@ export function buildReportPdf(day, libraries = {}) {
     doc.addFileToVFS(`NotoSans-${style}.ttf`, fonts[style]);
     doc.addFont(`NotoSans-${style}.ttf`, 'NotoSans', style === 'regular' ? 'normal' : 'bold');
   }
-  const { heading, header, labels, taskRows, blockers, carryover } = reportData(day);
+  const { heading, header, labels, taskRows, blockers, carryover } = reportData(day, options);
   doc.setProperties({ title: heading, subject: 'Daily work report', creator: 'EOD Work Log' });
   doc.setFont('NotoSans', 'bold');
   doc.setTextColor(24, 58, 86);
@@ -34,9 +34,9 @@ export function buildReportPdf(day, libraries = {}) {
     y = doc.lastAutoTable.finalY + 11;
   }
   const hasLocation = labels.length === 4;
-  section('Work completed / in progress', taskRows.length ? {
+  section('Production updates', taskRows.length ? {
     head: [labels], body: taskRows,
-    columnStyles: hasLocation ? { 0: { cellWidth: 39 }, 1: { cellWidth: 27 }, 3: { cellWidth: 25 } } : { 0: { cellWidth: 48 }, 2: { cellWidth: 25 } }
+    columnStyles: options.detailed ? (hasLocation ? { 0: { cellWidth: 39 }, 1: { cellWidth: 27 }, 3: { cellWidth: 25 } } : { 0: { cellWidth: 48 }, 2: { cellWidth: 25 } }) : (labels.length === 2 ? { 1: { cellWidth: 27 } } : {})
   } : { body: [['No tasks recorded.']] });
   section('Blockers', { body: [[blockers]] });
   if (carryover) section('Carryover / next shift', { body: [[carryover]] });

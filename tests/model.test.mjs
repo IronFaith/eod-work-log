@@ -1,6 +1,48 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newState, ensureDay, nextTask, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask } from '../model.mjs';
+import { newState, ensureDay, nextTask, quickTasks, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask } from '../model.mjs';
+
+test('a quick update survives backup without requiring or inventing ticket fields', () => {
+  const state = newState();
+  const day = ensureDay(state, '2026-09-24');
+  day.tasks = quickTasks('INC-204 — restored link; complete\r\n\r\n  Row B — dressed 3 bundles; 1 remaining  ');
+  assert.equal(day.tasks.length, 2);
+  assert.equal(day.tasks[1].summary, 'Row B — dressed 3 bundles; 1 remaining');
+  assert.notEqual(day.tasks[0].id, day.tasks[1].id);
+  day.quickDraft = 'Row A — pulled 4 bundles; 2 remaining';
+  const restored = parseBackup(exportBackup(state)).days[day.date];
+  assert.equal(restored.tasks[0].summary, 'INC-204 — restored link; complete');
+  assert.equal(restored.tasks[0].status, '');
+  assert.equal(restored.tasks[0].ticketId, '');
+  assert.equal(restored.quickDraft, 'Row A — pulled 4 bundles; 2 remaining');
+  const report = renderReport(restored);
+  assert.match(report.text, /INC-204 — restored link; complete/);
+  assert.doesNotMatch(report.text, /Pulling fiber|In progress|Quantity not recorded/);
+  assert.throws(() => validateTask({ ...nextTask(), entryType: 'quick', summary: '  ', status: '' }));
+});
+
+test('supervisor summary omits ticket requests while preserving production and optional full details', () => {
+  const day = ensureDay(newState(), '2026-09-24');
+  day.tasks = [{ ...nextTask(), entryType: 'ticket', title: 'Inspect cross-connect', ticketId: 'REQ-008', description: 'LONG ORIGINAL REQUEST', notes: 'Labeled both ends', quantity: '4', unit: 'connections', area: 'Row A', status: 'Completed' }];
+  const compact = renderReport(day);
+  for (const value of ['REQ-008', 'Labeled both ends', '4 connections', 'Row A', 'Completed']) assert.ok(compact.text.includes(value));
+  assert.doesNotMatch(compact.text, /LONG ORIGINAL REQUEST|Description:|Work performed:/);
+  assert.match(renderReport(day, { detailed: true }).text, /LONG ORIGINAL REQUEST/);
+  assert.equal(day.tasks[0].description, 'LONG ORIGINAL REQUEST');
+});
+
+test('unadded quick notes keep a report in draft and are preserved when backups merge', () => {
+  const state = newState();
+  const day = ensureDay(state, '2026-09-24');
+  day.header = { start: '06:00', end: '16:00', location: 'Test site', supervisor: 'Test supervisor', lead: '', crew: 'Test crew' };
+  day.blockerState = 'None';
+  day.tasks = [{ ...nextTask(), quantity: '4' }];
+  day.quickDraft = 'Pending production update';
+  assert.ok(reportWarnings(day).some(warning => /quick notes/i.test(warning)));
+  assert.match(renderReport(day).text, /^Draft EOD/);
+  assert.equal(mergeBackup(newState(), parseBackup(exportBackup(state))).days[day.date].quickDraft, 'Pending production update');
+  assert.equal(ensureDay(state, '2026-09-25').quickDraft, '');
+});
 
 test('ticket descriptions survive saving and a row is not required for a complete report', () => {
   const state = newState();
@@ -30,7 +72,7 @@ test('ticket descriptions survive saving and a row is not required for a complet
 test('readable report output keeps ticket identity, request, and work performed in separate lines', () => {
   const day = ensureDay(newState(), '2026-09-24');
   day.tasks = [{ ...nextTask(), entryType: 'ticket', title: 'Inspect cross-connect', ticketId: 'REQ-008', description: 'Check the new connection', notes: 'Inspected and labeled both ends', status: 'Completed' }];
-  const report = renderReport(day);
+  const report = renderReport(day, { detailed: true });
   assert.match(report.text, /1\. Inspect cross-connect/);
   assert.match(report.text, /\nTicket: REQ-008\n/);
   assert.match(report.text, /\nDescription: Check the new connection\n/);

@@ -16,7 +16,7 @@ export function sampleDay() {
 }
 
 test('PDF export produces multiple pages for long mixed work entries', () => {
-  const doc = buildReportPdf(sampleDay(), { jsPDF, autoTable });
+  const doc = buildReportPdf(sampleDay(), { jsPDF, autoTable }, { detailed: true });
   assert.ok(doc.getNumberOfPages() > 1);
   const output = doc.output();
   assert.ok(output.startsWith('%PDF-'));

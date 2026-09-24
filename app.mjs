@@ -1,5 +1,5 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=2';
-import { buildReportPdf } from './pdf.mjs?v=2';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, quickTasks, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3';
+import { buildReportPdf } from './pdf.mjs?v=3';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer;
@@ -14,6 +14,7 @@ try {
   $('save-state').classList.add('failed');
 }
 const day = () => ensureDay(state, activeDate);
+const reportOptions = () => ({ detailed: $('report-detail').checked });
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
 function toast(message) {
   $('toast').textContent = message;
@@ -54,30 +55,59 @@ function fillDay() {
   $('blockers').value = day().blockers;
   $('blocker-label').hidden = day().blockerState !== 'Reported';
   $('carryover').value = day().carryover;
+  $('quick-notes').value = day().quickDraft;
+  updateQuickButton();
   summary();
   renderHeader();
   renderTasks();
 }
 function renderTasks() {
   const tasks = day().tasks;
-  const completed = tasks.filter(task => task.status === 'Completed').length;
-  $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} recorded · ${completed} completed` : 'Add a task as you go.';
+  $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'entry' : 'entries'} in your report` : 'Your updates will appear here.';
   $('task-list').innerHTML = tasks.length ? tasks.map(task => {
+    if (task.entryType === 'quick') return `<article class="task-card quick-card"><p class="quick-update">${esc(task.summary)}</p><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}">Delete</button></div></article>`;
     const statusClass = task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
     const context = [task.ticketId ? `Ticket ${task.ticketId}` : task.entryType === 'ticket' ? 'Ticket' : task.entryType === 'general' ? 'General work' : 'Field work', task.area].filter(Boolean).join(' · ');
     return `<article class="task-card ${statusClass}"><div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div><span class="status ${statusClass}">${esc(task.status)}</span></div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete ${esc(taskName(task))}">Delete</button></div></article>`;
-  }).join('') : '<div class="empty-state"><div class="empty-icon" aria-hidden="true">+</div><h3>Start with your first entry</h3><p>Add field work, a ticket, or a general task. Record what you did; include rows and quantities when they apply.</p></div>';
+  }).join('') : '';
+}
+function updateQuickButton() {
+  const count = $('quick-notes').value.split(/\r\n|\n|\r/).filter(line => line.trim()).length;
+  $('save-quick').disabled = !count;
+  $('save-quick').textContent = count > 1 ? `Add ${count} updates` : 'Add to log';
+  $('quick-error').hidden = true;
+}
+function addQuickUpdates(event) {
+  event.preventDefault();
+  try {
+    const tasks = quickTasks($('quick-notes').value);
+    if (!tasks.length) return;
+    if (day().tasks.length + tasks.length > 1000) throw new Error('Use up to 1,000 entries per day.');
+    day().tasks.push(...tasks);
+    day().quickDraft = '';
+    const saved = persist();
+    $('quick-notes').value = '';
+    updateQuickButton(); renderTasks();
+    toast(saved ? `${tasks.length === 1 ? 'Update' : `${tasks.length} updates`} added` : 'Updates added — export a backup to keep them');
+  } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
+}
+function openQuickEdit(task) {
+  editingTask = task.id;
+  $('quick-edit-text').value = task.summary;
+  $('quick-edit-error').hidden = true;
+  $('quick-dialog').showModal();
 }
 function renderReportView() {
   const warnings = reportWarnings(day());
   $('report-checks').hidden = !warnings.length;
   $('report-checks').innerHTML = `<strong>A few details still need your review</strong><ul>${warnings.map(warning => `<li>${esc(warning)}</li>`).join('')}</ul><p class="small">Your report is marked Draft until these are filled in.</p>`;
-  $('report-preview').innerHTML = renderReport(day()).html;
+  $('report-preview').innerHTML = renderReport(day(), reportOptions()).html;
+  $('report-preview').classList.toggle('compact-report', !reportOptions().detailed);
   $('manual-copy').hidden = true;
   $('share-status').hidden = true;
 }
 function renderHistory() {
-  const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
+  const days = Object.values(state.days).filter(value => value.updatedAt || value.tasks.length || value.quickDraft || value.blockers || value.carryover).sort((a, b) => b.date.localeCompare(a.date));
   $('history-list').innerHTML = days.length ? days.map(value => `<button class="history-item" data-date="${esc(value.date)}"><span><strong>${esc(dateLabel(value.date))}</strong><span class="small muted">${esc(value.header.location || 'Location not recorded')} · ${value.tasks.length} ${value.tasks.length === 1 ? 'task' : 'tasks'}</span></span><span class="chevron" aria-hidden="true">›</span></button>`).join('') : '<div class="empty-state"><h3>Your saved days will appear here</h3><p>Start recording work in Today. You can return to any saved day here.</p></div>';
 }
 function showTab(tab, scroll = true) {
@@ -166,14 +196,14 @@ function downloadFile(content, name, type) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 async function copyReport(rich) {
-  const report = renderReport(day());
+  const report = renderReport(day(), reportOptions());
   $('manual-copy').hidden = true;
   try {
     if (rich) {
       if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Formatted copying unavailable');
       const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>\n${report.html}\n</body></html>`;
       await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([report.text], { type: 'text/plain' }) })]);
-      shareStatus('Formatted report copied. If Teams flattens it, share the PDF to keep the tables or try Copy readable text.');
+      shareStatus('Alternate format copied. Compare the paste in Teams with Copy table before sending.');
       return;
     }
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
@@ -188,13 +218,34 @@ async function copyReport(rich) {
     toast('Select and copy the report text below.');
   }
 }
+function selectReport() {
+  const preview = $('report-preview');
+  preview.focus({ preventScroll: true });
+  const range = document.createRange();
+  range.selectNodeContents(preview);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+function copyTable() {
+  try {
+    selectReport();
+    // Native selection copy is a compatibility option for app paste targets.
+    // Keep the Async Clipboard option and manual selection available as well.
+    if (!document.execCommand('copy')) throw new Error('Native copy unavailable');
+    window.getSelection().removeAllRanges();
+    shareStatus('Copy requested from the displayed table. Paste into Teams and check the borders and line breaks before sending.');
+  } catch {
+    shareStatus('Automatic table copying was unavailable. Use Select report, then your device’s Copy command.');
+  }
+}
 function shareStatus(message) {
   $('share-status').textContent = message;
   $('share-status').hidden = false;
 }
 async function exportPdf(share = false) {
   try {
-    const doc = buildReportPdf(day());
+    const doc = buildReportPdf(day(), {}, reportOptions());
     const name = `EOD-${activeDate}.pdf`;
     const blob = doc.output('blob');
     const file = new File([blob], name, { type: 'application/pdf' });
@@ -235,6 +286,20 @@ $('review-report').addEventListener('click', () => showTab('report'));
 $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab('today'); });
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
 $('add-task').addEventListener('click', () => openTask(nextTask()));
+$('quick-notes').addEventListener('input', () => { day().quickDraft = $('quick-notes').value; persist(); updateQuickButton(); });
+$('quick-form').addEventListener('submit', addQuickUpdates);
+for (const id of ['close-quick', 'cancel-quick']) $(id).addEventListener('click', () => $('quick-dialog').close());
+$('quick-edit-form').addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    const index = day().tasks.findIndex(task => task.id === editingTask);
+    if (index < 0) throw new Error('This update is no longer available.');
+    day().tasks[index] = validateTask({ ...day().tasks[index], summary: $('quick-edit-text').value.trim() });
+    const saved = persist();
+    $('quick-dialog').close(); renderTasks();
+    toast(saved ? 'Update saved' : 'Update changed — export a backup to keep it');
+  } catch (error) { $('quick-edit-error').textContent = error.message; $('quick-edit-error').hidden = false; }
+});
 for (const type of ['ticket', 'general']) $(`add-${type}`).addEventListener('click', () => openTask(nextTask({ entryType: type })));
 document.querySelectorAll('[data-quick]').forEach(button => button.addEventListener('click', () => openTask(nextTask({ kind: button.dataset.quick }))));
 $('task-kind').addEventListener('change', syncCustom);
@@ -249,7 +314,7 @@ $('task-list').addEventListener('click', event => {
   if (!button) return;
   const task = day().tasks.find(value => value.id === button.dataset.id);
   if (!task) return;
-  if (button.dataset.action === 'edit') return openTask(structuredClone(task), true);
+  if (button.dataset.action === 'edit') return task.entryType === 'quick' ? openQuickEdit(task) : openTask(structuredClone(task), true);
   if (button.dataset.action === 'next') return openTask(nextTask(task));
   if (button.dataset.action === 'delete') {
     if (!window.confirm(`Delete ${taskName(task)}${task.area ? ` at ${task.area}` : ''}? This removes it from this day’s report.`)) return;
@@ -260,6 +325,9 @@ $('task-list').addEventListener('click', event => {
 document.querySelectorAll('[name="blocker-state"]').forEach(input => input.addEventListener('change', () => { day().blockerState = input.value; $('blocker-label').hidden = input.value !== 'Reported'; persist(); }));
 for (const key of ['blockers', 'carryover']) $(key).addEventListener('input', event => { day()[key] = event.target.value; persist(); });
 $('copy-rich').addEventListener('click', () => copyReport(true));
+$('copy-table').addEventListener('click', copyTable);
+$('select-report').addEventListener('click', () => { selectReport(); shareStatus('Report selected. Use your device’s Copy command, or press Ctrl/Cmd+C.'); });
+$('report-detail').addEventListener('change', renderReportView);
 $('copy-plain').addEventListener('click', () => copyReport(false));
 $('share-pdf').hidden = !navigator.share || !navigator.canShare;
 $('share-pdf').addEventListener('click', () => exportPdf(true));
