@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.6">
+  <link rel="stylesheet" href="styles.css?v=3.7">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.6"></script>
+  <script type="module" src="app.mjs?v=3.7"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -43,6 +43,7 @@
         </div>
       </details>
 
+      <div class="work-preview-layout">
       <section class="work-section" aria-labelledby="tasks-title">
         <div class="section-heading"><div><h2 id="tasks-title">Log your work</h2><p class="muted small">Paste from your tickets or add a short update. Everything goes into the same daily log.</p></div></div>
         <div class="entry-workspace">
@@ -61,6 +62,7 @@
             <label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label>
           </div>
           <p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update.</p>
+          <div id="quick-preview-slot" class="preview-slot"></div>
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
           <p id="quick-error" class="small danger-text" role="alert" hidden></p>
         </form>
@@ -69,7 +71,7 @@
           <h3 id="paste-title">Review pasted updates</h3>
           <p class="small muted composer-intro">The first line is suggested as the title. Edit the result below, then add or update your log.</p>
           <p id="paste-stale" class="notice" hidden>Your paste or grouping changed. Use Refresh review to replace these suggestions with the new paste. This also replaces your review edits.</p>
-          <form id="paste-form"><div id="paste-list"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><button id="cancel-paste" type="button" class="text-button">Keep draft &amp; close</button><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
+          <form id="paste-form"><div id="paste-list"></div><div id="paste-preview-slot" class="preview-slot"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><button id="cancel-paste" type="button" class="text-button">Keep draft &amp; close</button><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
         </section>
         <form id="update-form" class="quick-composer single-composer" aria-labelledby="single-heading">
           <h3 id="single-heading">Add one update</h3>
@@ -81,6 +83,7 @@
           <textarea id="update-description" rows="3" maxlength="12000" placeholder="Replaced the patch cable; link stable." aria-describedby="update-description-help"></textarea>
           <p id="update-description-help" class="small muted field-help">Add the result, quantity, blocker, or next step if useful. No need to repeat the full ticket.</p>
           <div class="fields two organize-fields"><label>Category <span class="optional">optional</span><select id="update-category"></select></label><label>Row / area <span class="optional">optional</span><input id="update-area" maxlength="200" placeholder="Row A, Rack 12…"></label></div>
+          <div id="single-preview-slot" class="preview-slot"></div>
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
           <p id="update-error" class="small danger-text" role="alert" hidden></p>
         </form>
@@ -93,6 +96,8 @@
         <form id="bulk-form" class="organize-panel" hidden><p class="small muted">Apply either field to the selected entries. Unchecked fields stay as saved.</p><div class="fields two"><div><label class="check-label"><input id="bulk-category-apply" type="checkbox">Set category</label><select id="bulk-category" aria-label="Category for selected entries" disabled></select></div><div><label class="check-label"><input id="bulk-area-apply" type="checkbox">Set row / area</label><input id="bulk-area" aria-label="Row / area for selected entries" maxlength="200" placeholder="Blank clears the row / area" disabled></div></div><div class="copy-actions"><button id="save-bulk" class="button primary" type="submit" disabled>Apply to selected</button><button id="clear-selection" class="text-button" type="button">Clear selection</button></div></form>
         <div id="task-list"></div>
       </section>
+      <div id="live-preview-dock"><section id="live-preview" class="live-preview" aria-labelledby="live-preview-title"><div class="live-preview-heading"><div><p class="eyebrow">As you type</p><h3 id="live-preview-title">Live report preview</h3></div><span id="live-preview-state" class="status">Not saved</span></div><p id="live-preview-context" class="small muted"></p><div class="preview-format" role="group" aria-label="Report table format"><button type="button" data-preview-format="compact" aria-pressed="true">Compact</button><button type="button" data-preview-format="detailed" aria-pressed="false">Full details</button></div><p class="small muted preview-format-help">This also sets the format used in Report and PDF.</p><p id="live-preview-notice" class="small preview-notice" role="status" hidden></p><div id="live-preview-table" class="live-preview-table" tabindex="0" aria-label="Live production table"></div><p id="live-preview-help" class="small muted"></p></section></div>
+      </div>
 
       <section class="blockers-section" aria-labelledby="blockers-title">
         <div class="section-heading"><div><h2 id="blockers-title">Anything holding you up?</h2><p class="muted small">Confirm blockers before sharing your report.</p></div></div>
@@ -134,7 +139,7 @@
   <dialog id="task-dialog" aria-labelledby="dialog-title">
     <form id="task-form">
       <header class="dialog-header"><div><p class="eyebrow">Work entry</p><h2 id="dialog-title">Add a task</h2></div><button id="close-task" type="button" class="icon-button" aria-label="Close task editor">×</button></header>
-      <div class="dialog-body">
+      <div class="dialog-body task-dialog-body"><div class="task-edit-fields">
         <div id="task-error" class="notice danger" role="alert" hidden></div>
         <fieldset class="segmented entry-types"><legend class="sr-only">Work entry type</legend><label><input type="radio" name="entry-type" value="field" checked><span>Row / field work</span></label><label><input type="radio" name="entry-type" value="ticket"><span>Ticket</span></label><label><input type="radio" name="entry-type" value="general"><span>General work</span></label></fieldset>
         <div class="fields two">
@@ -150,6 +155,7 @@
           <label>Quantity <span class="optional">optional</span><input id="task-quantity" type="number" min="0" max="10000000" step="1" inputmode="numeric" placeholder="Enter count"></label><label>Unit<select id="task-unit"></select></label>
         </div></details>
         <details id="breakdown-details" class="breakdown-details"><summary>Cable length breakdown <span class="muted small">optional</span></summary><p class="muted small">Record groups by cable length. This describes the work above; it isn’t added to the task quantity.</p><div id="breakdown-list"></div><button id="add-breakdown" type="button" class="button secondary">+ Add length</button></details>
+        </div><div id="task-preview-slot" class="preview-slot"></div>
       </div>
       <footer class="dialog-footer"><button id="cancel-task" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save task</button></footer>
     </form>

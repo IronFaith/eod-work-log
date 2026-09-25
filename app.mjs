@@ -1,12 +1,15 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.6';
-import { buildReportPdf } from './pdf.mjs?v=3.6';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks } from './model.mjs?v=3.6';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.7';
+import { buildReportPdf } from './pdf.mjs?v=3.7';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables } from './model.mjs?v=3.7';
+import { previewDraft } from './preview.mjs?v=3.7';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
 const selectedTasks = new Set(), inlineEdits = new Map();
 const editKey = id => `${activeDate}:${id}`;
 const categoryOptions = (value = '', auto = false) => `${auto ? '<option value="auto">Suggest from title / progress</option>' : ''}<option value="">Uncategorized</option>${CATEGORIES.map(category => `<option${category === value ? ' selected' : ''}>${esc(category)}</option>`).join('')}`;
+const livePreview = $('live-preview'), previewDesktop = window.matchMedia('(min-width:1200px)');
+let previewContext = { kind: 'log' };
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) state = parseBackup(saved);
@@ -89,6 +92,61 @@ function renderTasks() {
   updateSelection();
   if (!$('carry-panel').hidden) renderCarryList();
   renderPasteReview();
+  renderLivePreview();
+}
+function currentSingleTask() {
+  const title = $('update-title').value.trim(), summary = $('update-description').value.trim();
+  const category = $('update-category').value === 'auto' ? suggestCategory(`${title}\n${summary}`) : $('update-category').value;
+  return { ...nextTask(), entryType: 'quick', title, summary, category, area: $('update-area').value.trim(), status: '' };
+}
+function currentInlineTask(id) {
+  const original = day().tasks.find(task => task.id === id), draft = inlineEdits.get(editKey(id));
+  if (!original || !draft) throw new Error('This entry is no longer available.');
+  return { ...original, title: draft.title.trim(), category: draft.category, area: draft.area.trim(), status: draft.status, ...(original.entryType === 'quick' ? { summary: draft.progress.trim() } : { notes: draft.progress.trim() }) };
+}
+function renderLivePreview() {
+  if ($('task-dialog').open) previewContext = { kind: 'task' };
+  else if (previewContext.kind === 'task' || (previewContext.kind === 'inline' && !inlineEdits.has(editKey(previewContext.id)))) previewContext = { kind: 'log' };
+  const { kind, id } = previewContext;
+  let host = $('live-preview-dock');
+  if (kind === 'task') host = $('task-preview-slot');
+  else if (!previewDesktop.matches) {
+    host = kind === 'single' ? $('single-preview-slot') : kind === 'paste' ? $('quick-preview-slot') : kind === 'review' && !$('paste-review').hidden ? $('paste-preview-slot') : host;
+    if (kind === 'inline') host = [...$('task-list').querySelectorAll('[data-edit-id]')].find(form => form.dataset.editId === id) || host;
+  }
+  if (livePreview.parentElement !== host) {
+    if (host.matches('.inline-editor')) host.querySelector('.inline-error').before(livePreview);
+    else host.append(livePreview);
+  }
+  const detailed = reportOptions().detailed;
+  livePreview.querySelectorAll('[data-preview-format]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.previewFormat === 'detailed') === detailed)));
+  $('live-preview-table').classList.toggle('preview-detailed', detailed);
+  $('live-preview-state').textContent = kind === 'log' ? 'In log' : 'Not saved';
+  $('live-preview-help').textContent = kind === 'log' ? 'Your logged production tables. Choose a form or Edit here to preview a change.' : 'Preview only. Use the form’s Save or Add button to include these changes in your log.';
+  let result, notice = '', context = kind === 'log' ? 'This day’s logged entries' : kind === 'single' ? 'One update · as it will appear in the report' : kind === 'inline' ? 'Editing an existing entry' : kind === 'task' ? `${entryType() === 'field' ? 'Row / field work' : entryType() === 'ticket' ? 'Ticket' : 'General work'} · current form` : 'Pasted batch · included updates';
+  try {
+    if (kind === 'log') result = { tasks: day().tasks, allTasks: day().tasks };
+    else if (kind === 'single') {
+      result = previewDraft(day().tasks, { task: $('update-title').value.trim() || $('update-description').value.trim() ? currentSingleTask() : null });
+      if (!$('update-title').value.trim() && result.tasks.length) notice = 'Add a short title before saving this update.';
+    } else if (kind === 'task') result = previewDraft(day().tasks, { task: currentDetailedTask(), editingId: editingTask });
+    else if (kind === 'inline') result = previewDraft(day().tasks, { task: currentInlineTask(id), editingId: id });
+    else {
+      if (kind === 'review' && !reviewIsCurrent()) throw new Error('Your paste changed. Refresh the review before previewing those choices.');
+      const rows = reviewIsCurrent() ? day().pasteReview.rows : createPasteReview(day().tasks, $('quick-notes').value, quickOptions()).rows;
+      result = previewDraft(day().tasks, { rows });
+      notice = [result.pending ? `${result.pending} matching ${result.pending === 1 ? 'ticket needs' : 'tickets need'} a Save as choice in Review before appearing here.` : '', result.skipped ? `${result.skipped} skipped ${result.skipped === 1 ? 'update is' : 'updates are'} excluded.` : ''].filter(Boolean).join(' ');
+    }
+    context += ` · ${result.tasks.length} ${result.tasks.length === 1 ? 'entry' : 'entries'}`;
+    $('live-preview-table').innerHTML = result.tasks.length ? renderProductionTables(result.tasks, { detailed, columnTasks: result.allTasks }) : '<p class="preview-empty">Type a title, fill in field work, or paste updates to see the report table here.</p>';
+    if (['paste', 'review'].includes(kind) && !result.tasks.length && (result.pending || result.skipped)) $('live-preview-table').innerHTML = '<p class="preview-empty">No included updates to preview yet.</p>';
+  } catch (error) {
+    notice = error.message;
+    $('live-preview-table').innerHTML = '<p class="preview-empty">Complete or correct the form to preview this entry.</p>';
+  }
+  $('live-preview-context').textContent = context;
+  $('live-preview-notice').textContent = notice;
+  $('live-preview-notice').hidden = !notice;
 }
 function inlineEditor(task, draft, number) {
   return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category<select data-inline-field="category">${categoryOptions(draft.category)}</select></label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label>${task.entryType !== 'quick' ? `<label>Status<select data-inline-field="status">${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
@@ -127,15 +185,14 @@ function addTitledUpdate(event) {
     const title = $('update-title').value.trim();
     if (!title) throw new Error('Enter a ticket or task title. A description is optional.');
     if (day().tasks.length >= 1000) throw new Error('Use up to 1,000 entries per day.');
-    const progress = $('update-description').value.trim();
-    const category = $('update-category').value === 'auto' ? suggestCategory(`${title}\n${progress}`) : $('update-category').value;
-    const task = validateTask({ ...nextTask(), entryType: 'quick', title, summary: progress, category, area: $('update-area').value.trim(), status: '' });
+    const task = validateTask(currentSingleTask());
     replaceTasks(day(), [...day().tasks, task], 'Add update');
     day().updateTitleDraft = '';
     day().updateDescriptionDraft = '';
     day().updateCategoryDraft = 'auto'; day().updateAreaDraft = '';
     const saved = persist();
     $('update-form').reset();
+    previewContext = { kind: 'log' };
     updateTitleButton(); renderTasks();
     $('update-title').focus();
     toast(saved ? 'Update added' : 'Update added — export a backup to keep it');
@@ -245,6 +302,7 @@ function showTab(tab, scroll = true) {
 function chooseDate(date) {
   try { ensureDay(state, date); } catch { $('report-date').value = activeDate; return; }
   activeDate = date;
+  previewContext = { kind: 'log' };
   selectedTasks.clear();
   $('carry-panel').hidden = true; $('bring-forward').setAttribute('aria-expanded', 'false');
   fillDay();
@@ -290,13 +348,17 @@ function openTask(task, edit = false) {
   $('breakdown-details').open = !!task.breakdown.length;
   $('location-details').open = entryType() === 'field' || !!task.area || !!task.zEnd || task.quantity !== '';
   $('task-dialog').showModal();
+  renderLivePreview();
   (entryType() === 'field' ? (task.kind === 'Custom task' ? $('task-custom') : $('task-area')) : $('task-title')).focus();
+}
+function currentDetailedTask() {
+  const category = $('task-category').value === 'auto' ? suggestCategory([$('task-title').value, $('task-notes').value, entryType() === 'field' ? $('task-kind').value : ''].join('\n')) : $('task-category').value;
+  return { ...day().tasks.find(value => value.id === editingTask), id: editingTask || crypto.randomUUID(), entryType: entryType(), title: $('task-title').value.trim(), ticketId: $('task-ticket').value.trim(), description: $('task-description').value.trim(), category, kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() };
 }
 function submitTask(event) {
   event.preventDefault();
   try {
-    const category = $('task-category').value === 'auto' ? suggestCategory([$('task-title').value, $('task-notes').value, entryType() === 'field' ? $('task-kind').value : ''].join('\n')) : $('task-category').value;
-    const task = validateTask({ ...day().tasks.find(value => value.id === editingTask), id: editingTask || crypto.randomUUID(), entryType: entryType(), title: $('task-title').value.trim(), ticketId: $('task-ticket').value.trim(), description: $('task-description').value.trim(), category, kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() });
+    const task = validateTask(currentDetailedTask());
     const index = day().tasks.findIndex(value => value.id === editingTask);
     const tasks = [...day().tasks];
     if (index >= 0) tasks[index] = task;
@@ -483,6 +545,7 @@ $('paste-form').addEventListener('submit', event => {
     const added = rows.filter(row => row.action === 'add').length, updated = rows.filter(row => row.action === 'update').length;
     if (added || updated) replaceTasks(day(), tasks, 'Save pasted updates');
     day().quickDraft = ''; day().pasteReview = null;
+    previewContext = { kind: 'log' };
     const saved = persist();
     $('quick-notes').value = '';
     updateQuickButton(); renderTasks();
@@ -505,6 +568,7 @@ $('task-list').addEventListener('click', event => {
   const task = day().tasks.find(value => value.id === button.dataset.id);
   if (!task) return;
   if (button.dataset.action === 'edit') {
+    previewContext = { kind: 'inline', id: task.id };
     inlineEdits.set(editKey(task.id), { title: task.title, progress: task.entryType === 'quick' ? task.summary : task.notes, category: task.category || '', area: task.area, status: task.status });
     renderTasks();
     [...$('task-list').querySelectorAll('[data-edit-id]')].find(form => form.dataset.editId === task.id)?.querySelector('input').focus();
@@ -541,7 +605,7 @@ $('task-list').addEventListener('submit', event => {
   try {
     const id = form.dataset.editId, original = day().tasks.find(task => task.id === id), draft = inlineEdits.get(editKey(id));
     if (!original || !draft) throw new Error('This entry is no longer available.');
-    const task = validateTask({ ...original, title: draft.title.trim(), category: draft.category, area: draft.area.trim(), status: draft.status, ...(original.entryType === 'quick' ? { summary: draft.progress.trim() } : { notes: draft.progress.trim() }) });
+    const task = validateTask(currentInlineTask(id));
     replaceTasks(day(), day().tasks.map(value => value.id === id ? task : value), 'Edit entry');
     inlineEdits.delete(editKey(id));
     const saved = persist(); renderTasks();
@@ -614,5 +678,33 @@ window.addEventListener('storage', event => {
   $('storage-warning').textContent = 'Your saved data changed in another tab. Export any unsaved changes here, then reload to use the latest records.';
   $('storage-warning').hidden = false;
 });
+function previewContextFor(target) {
+  if (livePreview.contains(target)) return null;
+  if (target.closest('#task-form')) return { kind: 'task' };
+  const inline = target.closest('[data-edit-id]');
+  if (inline) return { kind: 'inline', id: inline.dataset.editId };
+  if (target.closest('#paste-form')) return { kind: 'review' };
+  if (target.closest('#quick-form')) return { kind: 'paste' };
+  if (target.closest('#update-form')) return { kind: 'single' };
+  return null;
+}
+for (const eventName of ['input', 'change', 'focusin']) document.addEventListener(eventName, event => {
+  const context = previewContextFor(event.target);
+  if (!context) return;
+  if (eventName === 'focusin' && previewContext.kind === 'log' && ((context.kind === 'single' && !$('update-title').value.trim() && !$('update-description').value.trim()) || (context.kind === 'paste' && !$('quick-notes').value.trim()))) return;
+  previewContext = context;
+  renderLivePreview();
+});
+// Structural edits such as adding/removing a cable length also refresh the table.
+$('task-form').addEventListener('click', event => { if (!livePreview.contains(event.target) && event.target.closest('button')) renderLivePreview(); });
+$('task-dialog').addEventListener('close', renderLivePreview);
+livePreview.addEventListener('click', event => {
+  const button = event.target.closest('[data-preview-format]');
+  if (!button) return;
+  $('report-detail').checked = button.dataset.previewFormat === 'detailed';
+  renderLivePreview();
+});
+$('report-detail').addEventListener('change', renderLivePreview);
+previewDesktop.addEventListener('change', renderLivePreview);
 fillDay();
 if (day().header.location && day().header.crew) $('shift-details').open = false;

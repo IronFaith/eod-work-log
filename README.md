@@ -33,7 +33,15 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy alternate format** writes both HTML and plain text through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 3.6 reads existing schema 1–5 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 6 to retain categories, carry-forward references, and Undo. Older app versions cannot read schema 6 backups.
+Version 3.7 reads existing schema 1–6 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 6 to retain categories, carry-forward references, and Undo. Older app versions cannot read schema 6 backups.
+
+## Preview the report while entering work
+
+**Live report preview** follows the form you are using: Add one update, raw pasted notes, reviewed batches, inline edits, or detailed row/ticket/general work. On wide desktop screens it stays beside the work area; on smaller screens it sits with the active form. Detailed task dialogs include their own preview placement.
+
+The preview updates as you type, change grouping, choose categories, enter quantities, or complete cable breakdowns. It uses the same production-table renderer as Report. **Compact** and **Full details** also set the format for Report and PDF in the current session. Columns account for other entries already in the day’s report. Table content and columns match; the available width and PDF page layout can differ.
+
+Unsaved forms are marked **Not saved**. Previewing does not add or change log entries. Batch previews exclude skipped rows, require a save choice for matching tickets, and show field errors when a draft cannot yet be previewed. After saving or canceling, the panel shows the logged production tables. Shift details and blockers remain in the full Report view.
 
 ## Edit and organize the daily log
 

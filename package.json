@@ -1,11 +1,11 @@
 {
   "name": "eod-work-log",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check model.mjs && node --check app.mjs && node --check pdf.mjs && node --test tests/*.test.mjs",
+    "check": "node --check model.mjs && node --check app.mjs && node --check pdf.mjs && node --check preview.mjs && node --test tests/*.test.mjs",
     "vendor": "node scripts/vendor.mjs"
   },
   "devDependencies": {

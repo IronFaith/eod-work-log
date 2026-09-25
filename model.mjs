@@ -199,26 +199,36 @@ export function reportData(day, { detailed = false } = {}) {
   const dateLabel = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const heading = `${reportWarnings(day).length ? 'Draft EOD' : 'EOD'} — ${dateLabel}`;
   const header = [['Shift', `${clockLabel(day.header.start)}–${clockLabel(day.header.end)}`], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ...(day.header.lead.trim() ? [['Acting lead', day.header.lead.trim()]] : []), ['Crew', day.header.crew || 'Not recorded']];
-  const hasLocation = day.tasks.some(task => task.area);
-  const hasStatus = day.tasks.some(task => task.status);
-  const labels = detailed ? ['Work / ticket', ...(hasLocation ? ['Row / location'] : []), 'Description / progress', 'Status'] : ['Production / update', ...(hasStatus ? ['Status'] : [])];
-  const taskGroups = groupTasks(day.tasks).map(group => ({ ...group, rows: group.tasks.map(task => detailed ? [[taskName(task), task.ticketId ? `Ticket: ${task.ticketId}` : ''].filter(Boolean).join('\n'), ...(hasLocation ? [task.area || '—'] : []), taskDetails(task) || '—', task.status || '—'] : [taskSummary(task), ...(hasStatus ? [task.status || '—'] : [])]) }));
-  const taskRows = taskGroups.flatMap(group => group.rows);
+  const production = productionData(day.tasks, { detailed });
   const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
-  return { heading, header, labels, taskRows, taskGroups, blockers, carryover: day.carryover.trim() };
+  return { heading, header, ...production, blockers, carryover: day.carryover.trim() };
+}
+function productionData(tasks, { detailed = false, columnTasks = tasks } = {}) {
+  const hasLocation = columnTasks.some(task => task.area);
+  const hasStatus = columnTasks.some(task => task.status);
+  const labels = detailed ? ['Work / ticket', ...(hasLocation ? ['Row / location'] : []), 'Description / progress', 'Status'] : ['Production / update', ...(hasStatus ? ['Status'] : [])];
+  const taskGroups = groupTasks(tasks).map(group => ({ ...group, rows: group.tasks.map(task => detailed ? [[taskName(task), task.ticketId ? `Ticket: ${task.ticketId}` : ''].filter(Boolean).join('\n'), ...(hasLocation ? [task.area || '—'] : []), taskDetails(task) || '—', task.status || '—'] : [taskSummary(task), ...(hasStatus ? [task.status || '—'] : [])]) }));
+  const taskRows = taskGroups.flatMap(group => group.rows);
+  return { labels, taskRows, taskGroups };
+}
+function tableHTML(labels, rows) {
+  const cell = 'border:1px solid #b5bec7;padding:9px;text-align:left;vertical-align:top;';
+  return `<table border="1" cellpadding="9" cellspacing="0" style="border-collapse:collapse;width:100%;margin:12px 0;font:14px Arial,sans-serif;">\n<thead><tr>${labels.map(label => `<th style="${cell}background:#edf1f5;">${lines(label)}</th>`).join('\t')}</tr></thead>\n<tbody>\n${rows.map(row => `<tr>${row.map(value => `<td style="${cell}">${lines(value)}</td>`).join('\t')}</tr>`).join('\n')}\n</tbody></table>\n`;
+}
+export function renderProductionTables(tasks, options = {}) {
+  const { labels, taskGroups } = productionData(tasks, options);
+  return taskGroups.map(group => `<h3 style="font-size:15px;margin-top:18px;">${escapeHTML(group.label)}</h3>\n${tableHTML(labels, group.rows)}`).join('');
 }
 export function renderReport(day, options = {}) {
-  const { heading, header, labels, taskRows, taskGroups, blockers, carryover } = reportData(day, options);
+  const { heading, header, taskRows, taskGroups, blockers, carryover } = reportData(day, options);
   let index = 0;
   const updates = taskGroups.map(group => `${group.label}\n${group.tasks.map(task => {
     index++;
     if (!options.detailed || task.entryType === 'quick') return `${index}. ${taskSummary(task)}${task.status ? `\nStatus: ${task.status}` : ''}`;
     return [`${index}. ${taskName(task)}`, task.ticketId ? `Ticket: ${task.ticketId}` : '', task.area ? `Location: ${task.area}` : '', taskDetails(task), `Status: ${task.status}`].filter(Boolean).join('\n');
   }).join('\n\n')}`);
-  const cell = 'border:1px solid #b5bec7;padding:9px;text-align:left;vertical-align:top;';
-  const table = (labels, rows) => `<table border="1" cellpadding="9" cellspacing="0" style="border-collapse:collapse;width:100%;margin:12px 0;font:14px Arial,sans-serif;">\n<thead><tr>${labels.map(label => `<th style="${cell}background:#edf1f5;">${lines(label)}</th>`).join('\t')}</tr></thead>\n<tbody>\n${rows.map(row => `<tr>${row.map(value => `<td style="${cell}">${lines(value)}</td>`).join('\t')}</tr>`).join('\n')}\n</tbody></table>\n`;
   return {
-    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${table(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Production updates</h2>\n${taskRows.length ? taskGroups.map(group => `<h3 style="font-size:15px;margin-top:18px;">${escapeHTML(group.label)}</h3>\n${table(labels, group.rows)}`).join('') : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
+    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Production updates</h2>\n${taskRows.length ? renderProductionTables(day.tasks, options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
     text: `${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nPRODUCTION UPDATES\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`
   };
 }
