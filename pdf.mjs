@@ -1,4 +1,5 @@
-import { reportData } from './model.mjs?v=3.7';
+import { reportData } from './model.mjs?v=3.8';
+import { linkParts } from './links.mjs?v=3.8';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
@@ -6,7 +7,45 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
   const Pdf = libraries.jsPDF || globalThis.jspdf?.jsPDF;
   if (!Pdf) throw new Error('PDF library is unavailable');
   const doc = new Pdf({ unit: 'mm', format: 'a4', compress: true, putOnlyUsedFonts: true });
-  const table = options => libraries.autoTable ? libraries.autoTable(doc, options) : doc.autoTable(options);
+  const linkOffsets = new WeakMap();
+  const table = options => {
+    const body = options.body.map(row => row.map(value => {
+      let content = '';
+      const links = [];
+      for (const part of linkParts(value)) {
+        const text = part.text.replace(/\r\n?|\n/g, '\n').replace(/[^\S\n]+/g, ' ');
+        if (part.url) links.push({ start: content.length, end: content.length + text.length, url: part.url });
+        content += text;
+      }
+      return { content, links };
+    }));
+    const didDrawCell = ({ cell, section }) => {
+      if (section !== 'body' || !cell.raw.links?.length) return;
+      const raw = cell.raw, position = cell.getTextPos();
+      const height = doc.getLineHeight() / doc.internal.scaleFactor;
+      let offset = linkOffsets.get(raw) || 0;
+      cell.text.forEach((line, index) => {
+        const start = raw.content.indexOf(line, offset);
+        if (start < 0) return;
+        for (const link of raw.links) {
+          const from = Math.max(start, link.start), to = Math.min(start + line.length, link.end);
+          if (to <= from) continue;
+          const x = position.x + doc.getTextWidth(line.slice(0, from - start));
+          const y = position.y + index * height;
+          const width = doc.getTextWidth(line.slice(from - start, to - start));
+          doc.link(x, y, width, height, { url: link.url });
+          doc.setDrawColor(22, 93, 145); doc.setLineWidth(0.15);
+          doc.line(x, y + height * 0.85, x + width, y + height * 0.85);
+        }
+        offset = start + line.length;
+        if (raw.content[offset] === '\n') offset++;
+      });
+      // AutoTable reuses raw cells when a long row continues on another page.
+      linkOffsets.set(raw, offset);
+    };
+    const settings = { ...options, body, didDrawCell };
+    return libraries.autoTable ? libraries.autoTable(doc, settings) : doc.autoTable(settings);
+  };
   for (const style of ['regular', 'bold']) {
     doc.addFileToVFS(`NotoSans-${style}.ttf`, fonts[style]);
     doc.addFont(`NotoSans-${style}.ttf`, 'NotoSans', style === 'regular' ? 'normal' : 'bold');

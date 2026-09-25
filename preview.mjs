@@ -1,4 +1,4 @@
-import { applyPasteReview, validateTask } from './model.mjs?v=3.7';
+import { applyPasteReview, validateTask } from './model.mjs?v=3.8';
 
 // Project the current form onto a copy of the log. Previewing never saves work.
 export function previewDraft(savedTasks, { task, editingId = null, rows } = {}) {

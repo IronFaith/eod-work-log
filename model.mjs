@@ -1,3 +1,5 @@
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=3.8';
+export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
 export const UNITS = ['bundles', 'fibers', 'cables', 'connections', 'items'];
@@ -6,7 +8,7 @@ export const ENTRY_TYPES = ['field', 'ticket', 'general', 'quick'];
 export const QUICK_MODES = ['lines', 'single', 'blocks', 'table'];
 export const CATEGORIES = ['Pulling / installation', 'Dressing / bundling', 'Labeling / testing', 'Rework / troubleshooting', 'General / support'];
 export function suggestCategory(text) {
-  text = text.replace(/\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi, '');
+  text = displayText(text).replace(/\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi, '');
   const patterns = [/\b(pull(?:ing|ed)?|install(?:ing|ed|ation)?)\b/i, /\b(dress(?:ing|ed)?|bundl(?:ed|ing)|roll(?:ing|ed)?)\b|\bbundle\s+(?:cables?|fibers?)\b/i, /\b(label(?:s|ing|ed)?|test(?:s|ing|ed)?)\b/i, /\b(rework|troubleshoot(?:ing)?|repair(?:ing|ed)?)\b/i, /\b(housekeeping|cleanup|cleaning|support)\b/i];
   const matches = CATEGORIES.filter((_, index) => patterns[index].test(text));
   return matches.length === 1 ? matches[0] : '';
@@ -64,7 +66,7 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 6, defaults: blankHeader(), pastePreferences: null, days: {} }; }
+export function newState() { return { schema: 7, defaults: blankHeader(), pastePreferences: null, teamsTarget: '', days: {} }; }
 export function ensureDay(state, date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!Object.hasOwn(state.days, date)) state.days[date] = {
@@ -75,8 +77,7 @@ export function ensureDay(state, date) {
 export function nextTask(previous = {}) {
   return { id: crypto.randomUUID(), entryType: ENTRY_TYPES.includes(previous.entryType) ? previous.entryType : 'field', summary: '', title: '', ticketId: '', description: '', kind: KINDS.includes(previous.kind) ? previous.kind : KINDS[0], custom: previous.custom || '', category: previous.category || '', carriedFrom: '', area: '', zEnd: '', quantity: '', unit: UNITS.includes(previous.unit) ? previous.unit : 'bundles', status: previous.entryType === 'quick' ? '' : 'In progress', notes: '', breakdown: [] };
 }
-export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const lines = value => escapeHTML(value).replace(/\n/g, '<br>\n');
+const lines = richText;
 export const taskName = task => task.entryType === 'quick' ? task.title || task.summary : task.title || (task.kind === 'Custom task' ? task.custom : task.kind);
 export function taskDetails(task, { detailed = true } = {}) {
   if (task.entryType === 'quick') return task.title ? task.summary : '';
@@ -130,7 +131,7 @@ export function taskSummary(task) {
   return [identity, taskDetails(task, { detailed: false })].filter(Boolean).join('\n');
 }
 function ticketKey(task) {
-  const identity = task.ticketId || task.title || (task.summary || '').split('\n')[0];
+  const identity = displayText(task.ticketId || task.title || (task.summary || '').split('\n')[0]);
   const refs = identity.match(/\b(?:INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)[ -]?\d+\b|\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi) || [];
   const keys = [...new Set(refs.filter(ref => !/^(ROW|RACK|ROOM)-/i.test(ref)).map(ref => ref.toUpperCase().replace(/[ -]/g, '')))];
   return keys.length === 1 ? keys[0] : '';
@@ -229,7 +230,7 @@ export function renderReport(day, options = {}) {
   }).join('\n\n')}`);
   return {
     html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Production updates</h2>\n${taskRows.length ? renderProductionTables(day.tasks, options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
-    text: `${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nPRODUCTION UPDATES\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`
+    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nPRODUCTION UPDATES\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
   };
 }
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -294,9 +295,11 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
+  state.teamsTarget = textField(raw.teamsTarget, 4000);
+  teamsDestination(state.teamsTarget);
   if (raw.pastePreferences != null) {
     if (!isObject(raw.pastePreferences) || !QUICK_MODES.includes(raw.pastePreferences.mode) || typeof raw.pastePreferences.headers !== 'boolean') throw new Error('This backup has invalid paste preferences.');
     state.pastePreferences = { mode: raw.pastePreferences.mode, headers: raw.pastePreferences.headers };
@@ -319,5 +322,5 @@ export function mergeBackup(current, incoming) {
   for (const [date, day] of Object.entries(current.days)) {
     if (!Object.hasOwn(days, date) || hasDayContent(day, current.defaults)) days[date] = day;
   }
-  return { schema: 6, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, pastePreferences: current.pastePreferences || incoming.pastePreferences || null, days };
+  return { schema: 7, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
 }

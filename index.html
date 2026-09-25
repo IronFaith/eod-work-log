@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.7">
+  <link rel="stylesheet" href="styles.css?v=3.8">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.7"></script>
+  <script type="module" src="app.mjs?v=3.8"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -39,6 +39,7 @@
             <label>Acting lead <span class="optional">optional</span><input id="shift-lead" autocomplete="off" placeholder="Leave blank if none" maxlength="200"></label>
             <label>Crew<textarea id="shift-crew" rows="2" placeholder="Crew members’ names" maxlength="3000"></textarea></label>
           </div>
+          <button class="text-button link-tool" type="button" data-insert-link>Link a crew name / supervisor</button>
           <div class="defaults-row"><button id="save-defaults" class="button secondary" type="button">Use these details for future days</button><p class="muted small">New days always start with fresh tasks and blockers.</p></div>
         </div>
       </details>
@@ -52,6 +53,7 @@
           <p class="small muted composer-intro">Copy the notes or cells you already have. Paste, choose how to group them, then review.</p>
           <label for="quick-notes">Paste your updates</label>
           <textarea id="quick-notes" rows="6" maxlength="12000" placeholder="INC-204 — restored link; complete&#10;Row A — pulled 4 bundles; 2 remaining" aria-describedby="quick-help"></textarea>
+          <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
           <div class="paste-setup">
             <fieldset id="quick-mode" class="paste-modes"><legend>How should this paste be grouped?</legend>
               <label><input type="radio" name="quick-mode" value="lines" checked><span>One update per line</span></label>
@@ -82,6 +84,7 @@
           <label for="update-description">Description <span class="optional">optional</span></label>
           <textarea id="update-description" rows="3" maxlength="12000" placeholder="Replaced the patch cable; link stable." aria-describedby="update-description-help"></textarea>
           <p id="update-description-help" class="small muted field-help">Add the result, quantity, blocker, or next step if useful. No need to repeat the full ticket.</p>
+          <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
           <div class="fields two organize-fields"><label>Category <span class="optional">optional</span><select id="update-category"></select></label><label>Row / area <span class="optional">optional</span><input id="update-area" maxlength="200" placeholder="Row A, Rack 12…"></label></div>
           <div id="single-preview-slot" class="preview-slot"></div>
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
@@ -114,11 +117,12 @@
       <section class="pdf-share-card" aria-label="Share your PDF report">
         <div class="pdf-file"><span class="pdf-icon" aria-hidden="true">PDF</span><div><strong id="pdf-filename"></strong><p id="pdf-summary" class="small muted"></p></div><span id="pdf-readiness" class="status"></span></div>
         <p class="small pdf-description">Tables, production updates, and blockers, using the notes you already logged.</p>
-        <div class="copy-actions"><button id="share-pdf" class="button primary" hidden>Share PDF</button><button id="download-pdf" class="button secondary">Download PDF</button></div>
+        <div class="copy-actions"><button id="share-pdf" class="button primary" hidden>Share PDF</button><button id="download-pdf" class="button secondary">Download PDF</button><a id="open-teams" class="button secondary" target="_blank" rel="noopener noreferrer" hidden>Open Teams</a></div>
         <p id="pdf-help" class="small muted pdf-help">Download the PDF, then open Teams and tap + → Attach to choose it from Files or Downloads.</p>
+        <details id="teams-shortcut" class="teams-shortcut"><summary>Set up a Teams shortcut <span class="optional">optional</span></summary><form id="teams-form"><label for="teams-target">Work email or Teams conversation link</label><input id="teams-target" maxlength="4000" autocomplete="off" placeholder="name@company.com or a link copied from Teams" aria-describedby="teams-help"><p id="teams-help" class="small muted">Save your usual destination once. Open Teams takes you there; attach the PDF or paste your report and send it yourself.</p><div class="copy-actions"><button type="submit" class="button secondary">Save shortcut</button><button id="clear-teams" type="button" class="text-button">Clear shortcut</button></div><p id="teams-error" class="small danger-text" role="alert" hidden></p><p id="teams-status" class="small muted" role="status"></p></form></details>
         <p id="share-status" class="notice" role="status" hidden></p>
       </section>
-      <details class="sharing-options"><summary>Report options &amp; text copy</summary><label class="report-option"><input id="report-detail" type="checkbox">Include full ticket descriptions and detail columns</label><div class="copy-actions"><button id="copy-plain" class="button secondary">Copy readable text</button><button id="copy-table" class="button secondary">Copy table</button><button id="select-report" class="button secondary">Select report</button><button id="copy-rich" class="button secondary">Copy alternate format</button></div><p class="small muted">Text copying is optional. Teams on iPhone may remove pasted table formatting; the PDF keeps its layout.</p></details>
+      <details class="sharing-options"><summary>Report options &amp; text copy</summary><label class="report-option"><input id="report-detail" type="checkbox">Include full ticket descriptions and detail columns</label><div class="copy-actions"><button id="copy-plain" class="button secondary">Copy readable text</button><button id="copy-table" class="button secondary">Copy table</button><button id="select-report" class="button secondary">Select report</button><button id="copy-rich" class="button secondary">Copy with links</button></div><p class="small muted">Copy with links includes clickable labels and a plain-text fallback with full URLs. Review your paste before sending: Teams can change formatting, especially on iPhone. PDF keeps the layout and clickable links.</p></details>
       <div class="preview-heading"><h3>Report preview</h3><button class="text-button" data-tab="today">Edit log</button></div>
       <div id="report-preview" class="report-paper" tabindex="0" aria-label="Formatted report"></div>
       <div id="manual-copy" class="notice" hidden><label>Copy this report<textarea id="manual-text" rows="10" readonly></textarea></label><p class="small">Automatic copying isn’t available here. Select and copy the text above.</p></div>
@@ -150,6 +154,7 @@
           <label class="full">Description / request <span class="optional">optional</span><textarea id="task-description" rows="3" placeholder="What does the ticket or task ask for?" maxlength="12000"></textarea></label>
           <label class="full">Work performed / progress <span class="optional">optional</span><textarea id="task-notes" rows="3" placeholder="What you did, the result, and what remains" maxlength="12000"></textarea></label>
         </div>
+        <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
         <details id="location-details" class="work-extras"><summary>Location &amp; quantities <span class="muted small">optional</span></summary><div class="fields two">
           <label>Row / work area<input id="task-area" placeholder="Row, rack, or A-end" maxlength="200"></label><label>Z-end <span class="optional">optional</span><input id="task-zend" placeholder="Connection endpoint" maxlength="200"></label>
           <label>Quantity <span class="optional">optional</span><input id="task-quantity" type="number" min="0" max="10000000" step="1" inputmode="numeric" placeholder="Enter count"></label><label>Unit<select id="task-unit"></select></label>
@@ -158,6 +163,20 @@
         </div><div id="task-preview-slot" class="preview-slot"></div>
       </div>
       <footer class="dialog-footer"><button id="cancel-task" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save task</button></footer>
+    </form>
+  </dialog>
+  <dialog id="link-dialog" aria-labelledby="link-title">
+    <form id="link-form">
+      <header class="dialog-header"><h2 id="link-title">Insert a link</h2><button id="close-link" type="button" class="icon-button" aria-label="Close link helper">×</button></header>
+      <div class="dialog-body link-fields">
+        <label>Insert into<select id="link-field"></select></label>
+        <label>Link type<select id="link-type"><option value="url">Ticket, Teams message, or website</option><option value="person">Person in Teams</option></select></label>
+        <label>Text to show<input id="link-label" maxlength="200" placeholder="INC-204 or a person’s name" required></label>
+        <label><span id="link-value-label">Link address</span><input id="link-value" maxlength="4000" placeholder="https://…" autocomplete="off" required></label>
+        <p id="link-help" class="small muted">The report shows your label as a clickable link. Pasting a full URL into your notes works too.</p>
+        <p id="link-error" class="small danger-text" role="alert" hidden></p>
+      </div>
+      <footer class="dialog-footer"><button id="cancel-link" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Insert link</button></footer>
     </form>
   </dialog>
 </body>

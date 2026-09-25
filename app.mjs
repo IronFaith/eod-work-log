@@ -1,7 +1,8 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.7';
-import { buildReportPdf } from './pdf.mjs?v=3.7';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables } from './model.mjs?v=3.7';
-import { previewDraft } from './preview.mjs?v=3.7';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.8';
+import { buildReportPdf } from './pdf.mjs?v=3.8';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables } from './model.mjs?v=3.8';
+import { previewDraft } from './preview.mjs?v=3.8';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=3.8';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -49,7 +50,7 @@ function persist(markDay = true) {
 }
 function summary() {
   const header = day().header;
-  $('shift-summary').textContent = [header.location, header.lead.trim() ? `Lead: ${header.lead.trim()}` : ''].filter(Boolean).join(' · ') || 'Set up your day';
+  $('shift-summary').textContent = displayText([header.location, header.lead.trim() ? `Lead: ${header.lead.trim()}` : ''].filter(Boolean).join(' · ')) || 'Set up your day';
 }
 function renderHeader() {
   $('report-date').value = activeDate;
@@ -58,6 +59,7 @@ function renderHeader() {
   $('day-eyebrow').textContent = activeTab === 'history' ? 'Your work, in order' : 'Your daily record';
 }
 function fillDay() {
+  renderTeamsShortcut();
   for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).value = day().header[key];
   document.querySelectorAll('[name="blocker-state"]').forEach(input => { input.checked = input.value === day().blockerState; });
   $('blockers').value = day().blockers;
@@ -85,7 +87,7 @@ function renderTasks() {
     const context = [task.category || 'Uncategorized', task.area, task.ticketId ? `Ticket ${task.ticketId}` : ''].filter(Boolean).join(' · ');
     const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(taskName(task))}"${selectedTasks.has(task.id) ? ' checked' : ''}>Entry ${number}</label>`;
     const actions = `<div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}" aria-label="Edit entry ${number}">Edit here</button>${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
-    return `<article class="task-card ${statusClass}">${selection}${draft ? inlineEditor(task, draft, number) : `<div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div>${task.status ? `<span class="status ${statusClass}">${esc(task.status)}</span>` : ''}</div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div>${actions}`}</article>`;
+    return `<article class="task-card ${statusClass}">${selection}${draft ? inlineEditor(task, draft, number) : `<div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3></div>${task.status ? `<span class="status ${statusClass}">${esc(task.status)}</span>` : ''}</div>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : ''}</div>${actions}`}</article>`;
   }).join('')}`).join('');
   $('undo-log').disabled = !day().undo;
   $('undo-log').title = day().undo ? `Undo: ${day().undo.label}` : 'No log change to undo';
@@ -149,7 +151,7 @@ function renderLivePreview() {
   $('live-preview-notice').hidden = !notice;
 }
 function inlineEditor(task, draft, number) {
-  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category<select data-inline-field="category">${categoryOptions(draft.category)}</select></label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label>${task.entryType !== 'quick' ? `<label>Status<select data-inline-field="status">${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
+  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-linkable data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-linkable data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category<select data-inline-field="category">${categoryOptions(draft.category)}</select></label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label>${task.entryType !== 'quick' ? `<label>Status<select data-inline-field="status">${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
 }
 function updateSelection() {
   for (const id of selectedTasks) if (!day().tasks.some(task => task.id === id)) selectedTasks.delete(id);
@@ -243,7 +245,7 @@ function renderPasteReview() {
   const review = day().pasteReview;
   $('paste-review').hidden = !review?.rows.length;
   if (!review?.rows.length) { $('paste-list').innerHTML = ''; return; }
-  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><h4>Update ${index + 1}</h4><label>Title / ticket<input data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-field="summary" aria-label="Update ${index + 1} description" rows="3" maxlength="12000">${esc(row.summary)}</textarea></label><div class="fields two organize-fields"><label>Category<select data-field="category" aria-label="Update ${index + 1} category">${categoryOptions(row.category)}</select></label><label>Row / area<input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label></div><p class="small muted">Category is suggested when clear. Change or leave uncategorized.</p><p class="paste-match small"></p><p class="paste-current small muted"></p><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div>`).join('');
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><h4>Update ${index + 1}</h4><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="3" maxlength="12000">${esc(row.summary)}</textarea></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><div class="fields two organize-fields"><label>Category<select data-field="category" aria-label="Update ${index + 1} category">${categoryOptions(row.category)}</select></label><label>Row / area<input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label></div><p class="small muted">Category is suggested when clear. Change or leave uncategorized.</p><p class="paste-match small"></p><p class="paste-current small muted"></p><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div>`).join('');
   [...$('paste-list').children].forEach((element, index) => syncReviewDecision(element, index));
   updatePasteButton();
 }
@@ -392,7 +394,7 @@ async function copyReport(rich) {
       if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Formatted copying unavailable');
       const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>\n${report.html}\n</body></html>`;
       await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([report.text], { type: 'text/plain' }) })]);
-      shareStatus('Alternate format copied. Compare the paste in Teams with Copy table before sending.');
+      shareStatus('Report copied with clickable links and a readable text fallback. Review the paste in Teams before sending; PDF keeps the tables if Teams changes them.');
       return;
     }
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
@@ -706,5 +708,76 @@ livePreview.addEventListener('click', event => {
 });
 $('report-detail').addEventListener('change', renderLivePreview);
 previewDesktop.addEventListener('change', renderLivePreview);
+// The shortcut opens a destination only; report content is never put in the URL.
+function renderTeamsShortcut() {
+  const url = teamsDestination(state.teamsTarget);
+  $('teams-target').value = state.teamsTarget;
+  $('open-teams').hidden = !url;
+  if (url) $('open-teams').href = url;
+  else $('open-teams').removeAttribute('href');
+  $('teams-shortcut').querySelector('summary').textContent = url ? 'Change Teams shortcut' : 'Set up a Teams shortcut · optional';
+}
+$('teams-form').addEventListener('submit', event => {
+  event.preventDefault();
+  $('teams-error').hidden = true;
+  try {
+    const value = $('teams-target').value.trim();
+    teamsDestination(value);
+    state.teamsTarget = value;
+    const saved = persist(false);
+    renderTeamsShortcut();
+    $('teams-status').textContent = saved ? value ? 'Shortcut saved on this device. Use Open Teams when ready to share.' : 'Shortcut cleared.' : 'Could not save the shortcut. Export a backup to keep it.';
+  } catch (error) { $('teams-error').textContent = error.message; $('teams-error').hidden = false; $('teams-status').textContent = ''; }
+});
+$('clear-teams').addEventListener('click', () => { $('teams-target').value = ''; $('teams-form').requestSubmit(); });
+
+let lastLinkField = null, linkFields = [], linkRanges = [];
+for (const id of ['shift-supervisor', 'shift-lead', 'shift-crew', 'update-title', 'update-description', 'quick-notes', 'task-title', 'task-description', 'task-notes']) $(id).dataset.linkable = '';
+document.addEventListener('focusin', event => { if (event.target.matches('[data-linkable]')) lastLinkField = event.target; });
+function updateLinkHelp() {
+  const person = $('link-type').value === 'person';
+  $('link-value-label').textContent = person ? 'Work email / Teams sign-in name' : 'Link address';
+  $('link-value').placeholder = person ? 'name@company.com' : 'https://…';
+  $('link-help').textContent = person ? 'The name becomes a link to a Teams chat. It does not tag or notify them. For a real @mention, choose the person in Teams before sending.' : 'The report shows your label as a clickable link. Pasting a full URL into your notes works too.';
+}
+function selectLinkField() {
+  const index = Number($('link-field').value), field = linkFields[index], range = linkRanges[index];
+  $('link-label').value = field.value.slice(range.start, range.end);
+  $('link-error').hidden = true;
+}
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-insert-link]');
+  if (!button) return;
+  const scope = button.closest('.paste-entry, form, .shift-body');
+  linkFields = [...scope.querySelectorAll('[data-linkable]')];
+  const previous = linkFields.includes(lastLinkField) ? lastLinkField : linkFields.find(field => field.tagName === 'TEXTAREA') || linkFields[0];
+  linkRanges = linkFields.map(field => field === lastLinkField ? { start: field.selectionStart, end: field.selectionEnd } : { start: field.value.length, end: field.value.length });
+  $('link-field').innerHTML = linkFields.map((field, index) => `<option value="${index}">${esc((field.getAttribute('aria-label') || field.labels?.[0]?.textContent || 'Update').replace(/\s+/g, ' ').trim())}</option>`).join('');
+  $('link-field').value = String(linkFields.indexOf(previous));
+  $('link-type').value = scope.matches('.shift-body') ? 'person' : 'url';
+  $('link-value').value = '';
+  selectLinkField(); updateLinkHelp();
+  $('link-dialog').showModal();
+  $($('link-label').value ? 'link-value' : 'link-label').focus();
+});
+$('link-field').addEventListener('change', selectLinkField);
+$('link-type').addEventListener('change', updateLinkHelp);
+for (const id of ['close-link', 'cancel-link']) $(id).addEventListener('click', () => $('link-dialog').close());
+$('link-form').addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    const index = Number($('link-field').value), field = linkFields[index], { start, end } = linkRanges[index];
+    if (!field?.isConnected) throw new Error('This field is no longer open. Close the helper and try again.');
+    let link = makeLink($('link-label').value, $('link-value').value, $('link-type').value === 'person');
+    if (start === end) {
+      if (start && !/\s/.test(field.value[start - 1])) link = (field.id === 'shift-crew' ? '\n' : ' ') + link;
+      if (end < field.value.length && !/\s/.test(field.value[end])) link += ' ';
+    }
+    if (field.maxLength >= 0 && field.value.length - (end - start) + link.length > field.maxLength) throw new Error('That link is too long for this field. Add it in the description or progress instead.');
+    field.setRangeText(link, start, end, 'end');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    $('link-dialog').close(); field.focus();
+  } catch (error) { $('link-error').textContent = error.message; $('link-error').hidden = false; }
+});
 fillDay();
 if (day().header.location && day().header.crew) $('shift-details').open = false;
