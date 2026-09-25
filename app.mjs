@@ -1,8 +1,12 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.5';
-import { buildReportPdf } from './pdf.mjs?v=3.5';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.6';
+import { buildReportPdf } from './pdf.mjs?v=3.6';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks } from './model.mjs?v=3.6';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
+const selectedTasks = new Set(), inlineEdits = new Map();
+const editKey = id => `${activeDate}:${id}`;
+const categoryOptions = (value = '', auto = false) => `${auto ? '<option value="auto">Suggest from title / progress</option>' : ''}<option value="">Uncategorized</option>${CATEGORIES.map(category => `<option${category === value ? ' selected' : ''}>${esc(category)}</option>`).join('')}`;
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) state = parseBackup(saved);
@@ -58,6 +62,8 @@ function fillDay() {
   $('carryover').value = day().carryover;
   $('update-title').value = day().updateTitleDraft;
   $('update-description').value = day().updateDescriptionDraft;
+  $('update-category').value = day().updateCategoryDraft;
+  $('update-area').value = day().updateAreaDraft;
   updateTitleButton();
   $('quick-notes').value = day().quickDraft;
   document.querySelectorAll('[name="quick-mode"]').forEach(input => { input.checked = input.value === day().quickMode; });
@@ -70,16 +76,49 @@ function fillDay() {
 function renderTasks() {
   const tasks = day().tasks;
   $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'entry' : 'entries'} in your report` : 'Your updates will appear here.';
-  $('task-list').innerHTML = tasks.length ? tasks.map(task => {
-    if (task.entryType === 'quick') return `<article class="task-card quick-card">${task.title ? `<div class="quick-update titled-update"><h3>${esc(task.title)}</h3>${task.summary ? `<p>${esc(task.summary)}</p>` : ''}</div>` : `<p class="quick-update">${esc(task.summary)}</p>`}<div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}">Delete</button></div></article>`;
+  $('task-list').innerHTML = groupTasks(tasks, $('log-view').value).map(group => `${group.label ? `<h3 class="log-group">${esc(group.label)} <span class="small muted">${group.tasks.length}</span></h3>` : ''}${group.tasks.map(task => {
+    const number = tasks.indexOf(task) + 1, draft = inlineEdits.get(editKey(task.id));
     const statusClass = task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
-    const context = [task.ticketId ? `Ticket ${task.ticketId}` : task.entryType === 'ticket' ? 'Ticket' : task.entryType === 'general' ? 'General work' : 'Field work', task.area].filter(Boolean).join(' · ');
-    return `<article class="task-card ${statusClass}"><div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div><span class="status ${statusClass}">${esc(task.status)}</span></div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div><div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}">Edit</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button><button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete ${esc(taskName(task))}">Delete</button></div></article>`;
-  }).join('') : '';
+    const context = [task.category || 'Uncategorized', task.area, task.ticketId ? `Ticket ${task.ticketId}` : ''].filter(Boolean).join(' · ');
+    const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(taskName(task))}"${selectedTasks.has(task.id) ? ' checked' : ''}>Entry ${number}</label>`;
+    const actions = `<div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}" aria-label="Edit entry ${number}">Edit here</button>${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
+    return `<article class="task-card ${statusClass}">${selection}${draft ? inlineEditor(task, draft, number) : `<div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${esc(taskName(task))}</h3></div>${task.status ? `<span class="status ${statusClass}">${esc(task.status)}</span>` : ''}</div>${taskDetails(task) ? `<p class="task-details">${esc(taskDetails(task))}</p>` : ''}</div>${actions}`}</article>`;
+  }).join('')}`).join('');
+  $('undo-log').disabled = !day().undo;
+  $('undo-log').title = day().undo ? `Undo: ${day().undo.label}` : 'No log change to undo';
+  updateSelection();
+  if (!$('carry-panel').hidden) renderCarryList();
   renderPasteReview();
+}
+function inlineEditor(task, draft, number) {
+  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category<select data-inline-field="category">${categoryOptions(draft.category)}</select></label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label>${task.entryType !== 'quick' ? `<label>Status<select data-inline-field="status">${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
+}
+function updateSelection() {
+  for (const id of selectedTasks) if (!day().tasks.some(task => task.id === id)) selectedTasks.delete(id);
+  const count = selectedTasks.size;
+  $('selected-count').textContent = count ? `${count} selected` : '';
+  $('select-all').checked = count > 0 && count === day().tasks.length;
+  $('select-all').indeterminate = count > 0 && count < day().tasks.length;
+  $('select-all').disabled = !day().tasks.length;
+  $('bulk-form').hidden = !count;
+  $('save-bulk').disabled = !count || (!$('bulk-category-apply').checked && !$('bulk-area-apply').checked);
+}
+function renderCarryList() {
+  const source = state.days[$('carry-date').value];
+  const tasks = source?.tasks.filter(task => task.status !== 'Completed') || [];
+  $('carry-list').innerHTML = tasks.length ? tasks.map(task => {
+    const already = day().tasks.some(item => item.carriedFrom === `${source.date}:${task.id}`) || ticketMatches(day().tasks, task).length;
+    const untitled = task.entryType === 'quick' && !task.title;
+    const note = already ? 'Already in this day’s log' : untitled ? 'Add a short title in the original day first' : [task.category, task.area].filter(Boolean).join(' · ');
+    return `<label class="carry-choice check-label"><input type="checkbox" data-carry-id="${esc(task.id)}"${already || untitled ? ' disabled' : ''}><span>${esc(taskName(task))}<span class="small muted">${esc(note)}</span></span></label>`;
+  }).join('') : '<p class="small muted">No unfinished entries on this day. Updates without a status can be selected manually.</p>';
+  $('save-carry').disabled = true;
+  $('carry-error').hidden = true;
 }
 function updateTitleButton() {
   $('save-update').disabled = !$('update-title').value.trim();
+  const suggestion = suggestCategory(`${$('update-title').value}\n${$('update-description').value}`);
+  $('update-category').querySelector('[value="auto"]').textContent = suggestion ? `Suggested: ${suggestion}` : 'Suggest from title / progress';
   $('update-error').hidden = true;
 }
 function addTitledUpdate(event) {
@@ -88,10 +127,13 @@ function addTitledUpdate(event) {
     const title = $('update-title').value.trim();
     if (!title) throw new Error('Enter a ticket or task title. A description is optional.');
     if (day().tasks.length >= 1000) throw new Error('Use up to 1,000 entries per day.');
-    const task = validateTask({ ...nextTask(), entryType: 'quick', title, summary: $('update-description').value.trim(), status: '' });
-    day().tasks.push(task);
+    const progress = $('update-description').value.trim();
+    const category = $('update-category').value === 'auto' ? suggestCategory(`${title}\n${progress}`) : $('update-category').value;
+    const task = validateTask({ ...nextTask(), entryType: 'quick', title, summary: progress, category, area: $('update-area').value.trim(), status: '' });
+    replaceTasks(day(), [...day().tasks, task], 'Add update');
     day().updateTitleDraft = '';
     day().updateDescriptionDraft = '';
+    day().updateCategoryDraft = 'auto'; day().updateAreaDraft = '';
     const saved = persist();
     $('update-form').reset();
     updateTitleButton(); renderTasks();
@@ -144,7 +186,7 @@ function renderPasteReview() {
   const review = day().pasteReview;
   $('paste-review').hidden = !review?.rows.length;
   if (!review?.rows.length) { $('paste-list').innerHTML = ''; return; }
-  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><h4>Update ${index + 1}</h4><label>Title / ticket<input data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-field="summary" aria-label="Update ${index + 1} description" rows="3" maxlength="12000">${esc(row.summary)}</textarea></label><p class="paste-match small"></p><p class="paste-current small muted"></p><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div>`).join('');
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><h4>Update ${index + 1}</h4><label>Title / ticket<input data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-field="summary" aria-label="Update ${index + 1} description" rows="3" maxlength="12000">${esc(row.summary)}</textarea></label><div class="fields two organize-fields"><label>Category<select data-field="category" aria-label="Update ${index + 1} category">${categoryOptions(row.category)}</select></label><label>Row / area<input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label></div><p class="small muted">Category is suggested when clear. Change or leave uncategorized.</p><p class="paste-match small"></p><p class="paste-current small muted"></p><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div>`).join('');
   [...$('paste-list').children].forEach((element, index) => syncReviewDecision(element, index));
   updatePasteButton();
 }
@@ -165,17 +207,6 @@ function addQuickUpdates(event) {
     $('paste-list').querySelector('input')?.focus();
   } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
 }
-function openQuickEdit(task) {
-  editingTask = task.id;
-  $('quick-edit-title-label').hidden = !task.title;
-  $('quick-edit-title').required = !!task.title;
-  $('quick-edit-title').value = task.title;
-  $('quick-edit-label').textContent = task.title ? 'Description (optional)' : 'Production update';
-  $('quick-edit-text').required = !task.title;
-  $('quick-edit-text').value = task.summary;
-  $('quick-edit-error').hidden = true;
-  $('quick-dialog').showModal();
-}
 function renderReportView() {
   const warnings = reportWarnings(day());
   $('report-checks').hidden = !warnings.length;
@@ -194,6 +225,12 @@ function renderHistory() {
   $('history-list').innerHTML = days.length ? days.map(value => `<button class="history-item" data-date="${esc(value.date)}"><span><strong>${esc(dateLabel(value.date))}</strong><span class="small muted">${esc(value.header.location || 'Location not recorded')} · ${value.tasks.length} ${value.tasks.length === 1 ? 'task' : 'tasks'}</span></span><span class="chevron" aria-hidden="true">›</span></button>`).join('') : '<div class="empty-state"><h3>Your saved days will appear here</h3><p>Start recording work in Today. You can return to any saved day here.</p></div>';
 }
 function showTab(tab, scroll = true) {
+  if (tab === 'report' && [...inlineEdits.keys()].some(key => key.startsWith(`${activeDate}:`))) {
+    toast('Save or cancel the edits in your log before opening the report.');
+    showTab('today', scroll);
+    $('task-list').querySelector('.inline-editor input')?.focus();
+    return;
+  }
   activeTab = tab;
   for (const name of ['today', 'report', 'history']) $(`${name}-panel`).hidden = name !== tab;
   document.querySelectorAll('[data-tab]').forEach(button => {
@@ -208,12 +245,15 @@ function showTab(tab, scroll = true) {
 function chooseDate(date) {
   try { ensureDay(state, date); } catch { $('report-date').value = activeDate; return; }
   activeDate = date;
+  selectedTasks.clear();
+  $('carry-panel').hidden = true; $('bring-forward').setAttribute('aria-expanded', 'false');
   fillDay();
   if (activeTab === 'history') showTab('today');
   else showTab(activeTab, false);
 }
 
 for (const [id, values] of [['task-kind', KINDS], ['task-status', STATUSES], ['task-unit', UNITS]]) $(id).innerHTML = values.map(value => `<option>${esc(value)}</option>`).join('');
+for (const id of ['update-category', 'task-category', 'bulk-category']) $(id).innerHTML = categoryOptions('', id !== 'bulk-category');
 const entryType = () => document.querySelector('[name="entry-type"]:checked').value;
 function syncCustom() {
   const field = entryType() === 'field';
@@ -244,6 +284,7 @@ function openTask(task, edit = false) {
   $('task-form').reset();
   document.querySelectorAll('[name="entry-type"]').forEach(input => { input.checked = input.value === (task.entryType || 'field'); });
   for (const [field, property] of [['title', 'title'], ['ticket', 'ticketId'], ['description', 'description'], ['kind', 'kind'], ['status', 'status'], ['custom', 'custom'], ['area', 'area'], ['zend', 'zEnd'], ['quantity', 'quantity'], ['unit', 'unit'], ['notes', 'notes']]) $(`task-${field}`).value = task[property] || '';
+  $('task-category').value = edit ? task.category || '' : task.category || 'auto';
   syncCustom();
   renderBreakdown(task.breakdown);
   $('breakdown-details').open = !!task.breakdown.length;
@@ -254,10 +295,13 @@ function openTask(task, edit = false) {
 function submitTask(event) {
   event.preventDefault();
   try {
-    const task = validateTask({ id: editingTask || crypto.randomUUID(), entryType: entryType(), title: $('task-title').value.trim(), ticketId: $('task-ticket').value.trim(), description: $('task-description').value.trim(), kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() });
+    const category = $('task-category').value === 'auto' ? suggestCategory([$('task-title').value, $('task-notes').value, entryType() === 'field' ? $('task-kind').value : ''].join('\n')) : $('task-category').value;
+    const task = validateTask({ ...day().tasks.find(value => value.id === editingTask), id: editingTask || crypto.randomUUID(), entryType: entryType(), title: $('task-title').value.trim(), ticketId: $('task-ticket').value.trim(), description: $('task-description').value.trim(), category, kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() });
     const index = day().tasks.findIndex(value => value.id === editingTask);
-    if (index >= 0) day().tasks[index] = task;
-    else day().tasks.push(task);
+    const tasks = [...day().tasks];
+    if (index >= 0) tasks[index] = task;
+    else tasks.push(task);
+    replaceTasks(day(), tasks, index >= 0 ? 'Edit task details' : 'Add task');
     const saved = persist();
     $('task-dialog').close();
     renderTasks();
@@ -393,7 +437,7 @@ $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
 $('add-task').addEventListener('click', () => openTask(nextTask()));
 $('update-form').addEventListener('submit', addTitledUpdate);
-for (const [id, field] of [['update-title', 'updateTitleDraft'], ['update-description', 'updateDescriptionDraft']]) {
+for (const [id, field] of [['update-title', 'updateTitleDraft'], ['update-description', 'updateDescriptionDraft'], ['update-category', 'updateCategoryDraft'], ['update-area', 'updateAreaDraft']]) {
   $(id).addEventListener('input', () => { day()[field] = $(id).value; persist(); updateTitleButton(); });
   $(id).addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.isComposing) {
@@ -424,7 +468,7 @@ $('paste-list').addEventListener('input', event => {
   if (field === 'action') {
     row.action = event.target.value.startsWith('update:') ? 'update' : event.target.value;
     row.targetId = row.action === 'update' ? event.target.value.slice(7) : '';
-  } else if (field === 'title' || field === 'summary') row[field] = event.target.value;
+  } else if (['title', 'summary', 'category', 'area'].includes(field)) row[field] = event.target.value;
   syncReviewDecision(element, index, field === 'title');
   persist(); updatePasteButton();
 });
@@ -434,8 +478,10 @@ $('paste-form').addEventListener('submit', event => {
     if (!reviewIsCurrent()) throw new Error('The pasted text or grouping changed. Refresh the review first.');
     const rows = day().pasteReview.rows;
     if (!rows.length) return;
-    day().tasks = applyPasteReview(day().tasks, rows);
+    if (rows.some(row => row.action === 'update' && inlineEdits.has(editKey(row.targetId)))) throw new Error('Save or cancel the inline edits for the matching ticket first.');
+    const tasks = applyPasteReview(day().tasks, rows);
     const added = rows.filter(row => row.action === 'add').length, updated = rows.filter(row => row.action === 'update').length;
+    if (added || updated) replaceTasks(day(), tasks, 'Save pasted updates');
     day().quickDraft = ''; day().pasteReview = null;
     const saved = persist();
     $('quick-notes').value = '';
@@ -443,20 +489,6 @@ $('paste-form').addEventListener('submit', event => {
     $('quick-notes').focus();
     toast(saved ? `${added} added · ${updated} updated` : 'Log changed — export a backup to keep it');
   } catch (error) { $('paste-error').textContent = error.message; $('paste-error').hidden = false; }
-});
-for (const id of ['close-quick', 'cancel-quick']) $(id).addEventListener('click', () => $('quick-dialog').close());
-$('quick-edit-form').addEventListener('submit', event => {
-  event.preventDefault();
-  try {
-    const index = day().tasks.findIndex(task => task.id === editingTask);
-    if (index < 0) throw new Error('This update is no longer available.');
-    const title = day().tasks[index].title ? $('quick-edit-title').value.trim() : '';
-    if (day().tasks[index].title && !title) throw new Error('Enter a ticket or task title. A description is optional.');
-    day().tasks[index] = validateTask({ ...day().tasks[index], title, summary: $('quick-edit-text').value.trim() });
-    const saved = persist();
-    $('quick-dialog').close(); renderTasks();
-    toast(saved ? 'Update saved' : 'Update changed — export a backup to keep it');
-  } catch (error) { $('quick-edit-error').textContent = error.message; $('quick-edit-error').hidden = false; }
 });
 for (const type of ['ticket', 'general']) $(`add-${type}`).addEventListener('click', () => openTask(nextTask({ entryType: type })));
 document.querySelectorAll('[data-quick]').forEach(button => button.addEventListener('click', () => openTask(nextTask({ kind: button.dataset.quick }))));
@@ -472,14 +504,92 @@ $('task-list').addEventListener('click', event => {
   if (!button) return;
   const task = day().tasks.find(value => value.id === button.dataset.id);
   if (!task) return;
-  if (button.dataset.action === 'edit') return task.entryType === 'quick' ? openQuickEdit(task) : openTask(structuredClone(task), true);
+  if (button.dataset.action === 'edit') {
+    inlineEdits.set(editKey(task.id), { title: task.title, progress: task.entryType === 'quick' ? task.summary : task.notes, category: task.category || '', area: task.area, status: task.status });
+    renderTasks();
+    [...$('task-list').querySelectorAll('[data-edit-id]')].find(form => form.dataset.editId === task.id)?.querySelector('input').focus();
+    return;
+  }
+  if (button.dataset.action === 'cancel-edit') { inlineEdits.delete(editKey(task.id)); renderTasks(); return; }
+  if (button.dataset.action === 'details') return openTask(structuredClone(task), true);
   if (button.dataset.action === 'next') return openTask(nextTask(task));
   if (button.dataset.action === 'delete') {
     if (!window.confirm(`Delete ${taskName(task)}${task.area ? ` at ${task.area}` : ''}? This removes it from this day’s report.`)) return;
-    day().tasks = day().tasks.filter(value => value.id !== task.id);
-  } else if (button.dataset.action === 'complete') task.status = task.status === 'Completed' ? 'In progress' : 'Completed';
+    replaceTasks(day(), day().tasks.filter(value => value.id !== task.id), 'Delete entry');
+  } else if (button.dataset.action === 'complete') replaceTasks(day(), day().tasks.map(value => value.id === task.id ? { ...value, status: task.status === 'Completed' ? 'In progress' : 'Completed' } : value), 'Change status');
   persist(); renderTasks();
 });
+
+$('task-list').addEventListener('input', event => {
+  const form = event.target.closest('[data-edit-id]');
+  if (form && event.target.dataset.inlineField) inlineEdits.get(editKey(form.dataset.editId))[event.target.dataset.inlineField] = event.target.value;
+});
+$('task-list').addEventListener('change', event => {
+  const id = event.target.dataset.selectId;
+  if (!id) return;
+  if (event.target.checked) selectedTasks.add(id); else selectedTasks.delete(id);
+  updateSelection();
+});
+$('task-list').addEventListener('keydown', event => {
+  const form = event.target.closest('[data-edit-id]');
+  if (form && (event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.isComposing) { event.preventDefault(); form.requestSubmit(); }
+});
+$('task-list').addEventListener('submit', event => {
+  event.preventDefault();
+  const form = event.target.closest('[data-edit-id]');
+  if (!form) return;
+  try {
+    const id = form.dataset.editId, original = day().tasks.find(task => task.id === id), draft = inlineEdits.get(editKey(id));
+    if (!original || !draft) throw new Error('This entry is no longer available.');
+    const task = validateTask({ ...original, title: draft.title.trim(), category: draft.category, area: draft.area.trim(), status: draft.status, ...(original.entryType === 'quick' ? { summary: draft.progress.trim() } : { notes: draft.progress.trim() }) });
+    replaceTasks(day(), day().tasks.map(value => value.id === id ? task : value), 'Edit entry');
+    inlineEdits.delete(editKey(id));
+    const saved = persist(); renderTasks();
+    toast(saved ? 'Changes saved — Undo is available' : 'Changes made — export a backup to keep them');
+  } catch (error) { form.querySelector('.inline-error').textContent = error.message; form.querySelector('.inline-error').hidden = false; }
+});
+$('log-view').addEventListener('change', renderTasks);
+$('select-all').addEventListener('change', event => { selectedTasks.clear(); if (event.target.checked) day().tasks.forEach(task => selectedTasks.add(task.id)); renderTasks(); });
+$('clear-selection').addEventListener('click', () => { selectedTasks.clear(); renderTasks(); });
+for (const field of ['category', 'area']) $(`bulk-${field}-apply`).addEventListener('change', event => { $(`bulk-${field}`).disabled = !event.target.checked; updateSelection(); });
+$('bulk-form').addEventListener('submit', event => {
+  event.preventDefault();
+  if (!selectedTasks.size) return;
+  if ([...selectedTasks].some(id => inlineEdits.has(editKey(id)))) return toast('Save or cancel the selected entries’ inline edits first.');
+  const patch = {};
+  if ($('bulk-category-apply').checked) patch.category = $('bulk-category').value;
+  if ($('bulk-area-apply').checked) patch.area = $('bulk-area').value.trim();
+  if (!Object.keys(patch).length) return;
+  replaceTasks(day(), day().tasks.map(task => selectedTasks.has(task.id) ? { ...task, ...patch } : task), 'Organize selected entries');
+  const count = selectedTasks.size, saved = persist();
+  selectedTasks.clear(); renderTasks();
+  toast(saved ? `${count} entries organized — Undo is available` : 'Changes made — export a backup to keep them');
+});
+$('undo-log').addEventListener('click', () => {
+  if ([...inlineEdits.keys()].some(key => key.startsWith(`${activeDate}:`))) return toast('Save or cancel the inline edits before undoing a log change.');
+  if (!undoTasks(day())) return;
+  const saved = persist(); renderTasks();
+  toast(saved ? 'Last log change undone' : 'Change undone — export a backup to keep it');
+});
+$('bring-forward').addEventListener('click', () => {
+  const dates = Object.keys(state.days).filter(date => date < activeDate && state.days[date].tasks.length).sort().reverse();
+  $('carry-date').innerHTML = dates.length ? dates.map(date => `<option value="${date}">${esc(dateLabel(date))}</option>`).join('') : '<option value="">No earlier work days saved</option>';
+  $('carry-panel').hidden = false; $('bring-forward').setAttribute('aria-expanded', 'true');
+  renderCarryList(); $('carry-date').focus();
+});
+$('close-carry').addEventListener('click', () => { $('carry-panel').hidden = true; $('bring-forward').setAttribute('aria-expanded', 'false'); $('bring-forward').focus(); });
+$('carry-date').addEventListener('change', renderCarryList);
+$('carry-list').addEventListener('change', () => { $('save-carry').disabled = !$('carry-list').querySelector('input:checked'); });
+$('save-carry').addEventListener('click', () => {
+  try {
+    const ids = [...$('carry-list').querySelectorAll('input:checked')].map(input => input.dataset.carryId);
+    if (!ids.length) return;
+    replaceTasks(day(), carryTasks(state.days[$('carry-date').value], day(), ids), 'Bring work forward');
+    const saved = persist(); renderTasks();
+    toast(saved ? `${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} ready for today’s progress` : 'Entries added — export a backup to keep them');
+  } catch (error) { $('carry-error').textContent = error.message; $('carry-error').hidden = false; }
+});
+window.addEventListener('beforeunload', event => { if (inlineEdits.size) { event.preventDefault(); event.returnValue = ''; } });
 document.querySelectorAll('[name="blocker-state"]').forEach(input => input.addEventListener('change', () => { day().blockerState = input.value; $('blocker-label').hidden = input.value !== 'Reported'; persist(); }));
 for (const key of ['blockers', 'carryover']) $(key).addEventListener('input', event => { day()[key] = event.target.value; persist(); });
 $('copy-rich').addEventListener('click', () => copyReport(true));

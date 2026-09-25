@@ -33,7 +33,19 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy alternate format** writes both HTML and plain text through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 3.5 reads existing schema 1–4 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 5 to retain review edits and paste preferences. Older app versions cannot read schema 5 backups.
+Version 3.6 reads existing schema 1–5 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 6 to retain categories, carry-forward references, and Undo. Older app versions cannot read schema 6 backups.
+
+## Edit and organize the daily log
+
+Use **Edit here** on an entry to change its title, progress, category, or row/area directly in the log. **Save changes** (Ctrl/Cmd+Enter) commits the edit; **Cancel** keeps the saved entry. Detailed entries also have **Full details** for the original request, quantities, and cable breakdowns. Inline drafts stay available while changing views or dates in the current session; save or cancel before reloading or opening that day’s report.
+
+Category and row/area are optional. New entries suggest a category only when one work type is clear; ambiguous text stays uncategorized. Paste review lets you change the suggestion. Existing entries are not reclassified automatically. **Organize log** switches between All updates, By category, and By row/area (natural order, such as Row 2 before Row 10). Check entries, choose **Set category** and/or **Set row/area**, then **Apply to selected** to organize them together. Blank area clears the tag only when Set row/area is checked.
+
+The report, readable text, and PDF group entries by category and include uncategorized work. Each entry retains its title/ticket, optional location, and progress; blockers remain in a separate section. An empty acting lead is omitted.
+
+**Undo last log change** restores the previous task list after adding, editing, deleting, changing status, organizing, or bringing work forward. One undo is saved per day and survives a reload or backup. It does not change shift details or current composer drafts, and it does not undo clearing an all-skipped paste review.
+
+**Bring work forward** starts with the latest earlier saved work day. Select only unfinished work; completed detailed entries and tickets already logged on the destination day cannot be selected. Updates without a status require your judgment. Titles, ticket references, original requests, categories, and locations are retained; progress, quantities, and cable breakdowns start blank with new entry IDs. Untitled legacy notes need a short title in the original day first so an old production result is not mistaken for today’s work. Nothing is brought forward automatically, and the original day remains unchanged.
 
 An internet connection is needed to launch the app. There is no service worker or offline-launch support. Storage is tied to this website and browser context; it is not encrypted cloud storage or automatic iCloud sync. Clearing browser data can remove reports. Keep periodic backup exports in a private location such as Files or iCloud Drive. Do not commit backups to this repository.
 

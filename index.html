@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.5">
+  <link rel="stylesheet" href="styles.css?v=3.6">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.5"></script>
+  <script type="module" src="app.mjs?v=3.6"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -80,13 +80,17 @@
           <label for="update-description">Description <span class="optional">optional</span></label>
           <textarea id="update-description" rows="3" maxlength="12000" placeholder="Replaced the patch cable; link stable." aria-describedby="update-description-help"></textarea>
           <p id="update-description-help" class="small muted field-help">Add the result, quantity, blocker, or next step if useful. No need to repeat the full ticket.</p>
+          <div class="fields two organize-fields"><label>Category <span class="optional">optional</span><select id="update-category"></select></label><label>Row / area <span class="optional">optional</span><input id="update-area" maxlength="200" placeholder="Row A, Rack 12…"></label></div>
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
           <p id="update-error" class="small danger-text" role="alert" hidden></p>
         </form>
         </div>
         </div>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
-        <p id="task-count" class="muted small log-count"></p>
+        <div class="log-toolbar"><div><h3>Your daily log</h3><p id="task-count" class="muted small"></p></div><div class="log-tools"><button id="bring-forward" class="button secondary" type="button" aria-expanded="false" aria-controls="carry-panel">Bring work forward</button><button id="undo-log" class="button secondary" type="button" disabled>Undo last log change</button></div></div>
+        <section id="carry-panel" class="organize-panel" aria-labelledby="carry-title" hidden><h3 id="carry-title">Bring unfinished work forward</h3><p class="small muted">Select only work still open. Ticket details, category, and location carry over. Today’s progress and quantities start blank.</p><label>From day<select id="carry-date"></select></label><div id="carry-list"></div><div class="copy-actions"><button id="save-carry" class="button primary" type="button" disabled>Bring selected work forward</button><button id="close-carry" class="button secondary" type="button">Close</button></div><p id="carry-error" class="small danger-text" role="alert" hidden></p></section>
+        <div class="log-view-row"><label>Organize log<select id="log-view"><option value="all">All updates</option><option value="category">By category</option><option value="area">By row / area</option></select></label><label class="check-label"><input id="select-all" type="checkbox">Select all</label><span id="selected-count" class="small muted" role="status"></span></div>
+        <form id="bulk-form" class="organize-panel" hidden><p class="small muted">Apply either field to the selected entries. Unchecked fields stay as saved.</p><div class="fields two"><div><label class="check-label"><input id="bulk-category-apply" type="checkbox">Set category</label><select id="bulk-category" aria-label="Category for selected entries" disabled></select></div><div><label class="check-label"><input id="bulk-area-apply" type="checkbox">Set row / area</label><input id="bulk-area" aria-label="Row / area for selected entries" maxlength="200" placeholder="Blank clears the row / area" disabled></div></div><div class="copy-actions"><button id="save-bulk" class="button primary" type="submit" disabled>Apply to selected</button><button id="clear-selection" class="text-button" type="button">Clear selection</button></div></form>
         <div id="task-list"></div>
       </section>
 
@@ -127,8 +131,6 @@
   <nav class="bottom-nav" aria-label="Main navigation"><button data-tab="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 11h16m-11 4h2m3 0h2"/></svg><span>Today</span></button><button data-tab="report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H5V3h2zm7 0v6h5M8 13h8m-8 4h6"/></svg><span>Report</span></button><button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6m2-3v5l3 2"/></svg><span>History</span></button></nav>
   <div id="toast" role="status" class="toast" hidden></div>
 
-  <dialog id="quick-dialog" aria-labelledby="quick-dialog-title"><form id="quick-edit-form"><header class="dialog-header"><h2 id="quick-dialog-title">Edit update</h2><button id="close-quick" type="button" class="icon-button" aria-label="Close update editor">×</button></header><div class="dialog-body"><label id="quick-edit-title-label" hidden>Title / ticket<input id="quick-edit-title" maxlength="200"></label><label id="quick-edit-label" for="quick-edit-text">Production update</label><textarea id="quick-edit-text" rows="5" maxlength="12000" required></textarea><p class="muted small">Keep just the reference, result, and anything still needed.</p><p id="quick-edit-error" class="small danger-text" role="alert" hidden></p></div><footer class="dialog-footer"><button id="cancel-quick" type="button" class="button secondary">Cancel</button><button type="submit" class="button primary">Save update</button></footer></form></dialog>
-
   <dialog id="task-dialog" aria-labelledby="dialog-title">
     <form id="task-form">
       <header class="dialog-header"><div><p class="eyebrow">Work entry</p><h2 id="dialog-title">Add a task</h2></div><button id="close-task" type="button" class="icon-button" aria-label="Close task editor">×</button></header>
@@ -139,7 +141,7 @@
           <label class="full">Work title <span id="title-optional" class="optional">optional</span><input id="task-title" placeholder="Short summary of the work" maxlength="200"></label>
           <label id="kind-label">Field work type<select id="task-kind"></select></label><label>Status<select id="task-status"></select></label>
           <label id="custom-label" class="full" hidden>Custom task name<input id="task-custom" placeholder="Describe the type of work" maxlength="160"></label>
-          <label>Ticket number <span class="optional">optional</span><input id="task-ticket" placeholder="INC, REQ, or work order number" maxlength="160"></label>
+          <label>Ticket number <span class="optional">optional</span><input id="task-ticket" placeholder="INC, REQ, or work order number" maxlength="160"></label><label>Category <span class="optional">optional</span><select id="task-category"></select></label>
           <label class="full">Description / request <span class="optional">optional</span><textarea id="task-description" rows="3" placeholder="What does the ticket or task ask for?" maxlength="12000"></textarea></label>
           <label class="full">Work performed / progress <span class="optional">optional</span><textarea id="task-notes" rows="3" placeholder="What you did, the result, and what remains" maxlength="12000"></textarea></label>
         </div>
