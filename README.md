@@ -33,7 +33,24 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy with links** writes both HTML with clickable labels and plain text with full URLs through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks and link destinations. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 3.8 reads existing schema 1–7 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 7 to retain the optional Teams shortcut as well as categories, carry-forward references, and Undo. Older app versions cannot read schema 7 backups.
+Version 3.9 reads existing schema 1–7 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 7 to retain the optional Teams shortcut as well as categories, carry-forward references, and Undo. Older app versions cannot read schema 7 backups.
+
+## Format text while entering it
+
+Titles, descriptions, pasted updates, crew names, blockers, and carryover now show completed formatting directly inside the entry field:
+
+- `**Hello**` or `** Hello **` shows **Hello**.
+- `[Google](https://google.com)` shows a link labelled Google.
+- `url(https://google.com)` shows a link labelled google. This shortcut uses the first part of the hostname after `www`; use a named link for a custom label.
+- Full HTTP/HTTPS URLs remain supported.
+
+Complete formatting hides its markup as you type. Incomplete or invalid syntax, such as `**unfinished` or a link missing its closing parenthesis, remains literal and visible. HTML is displayed as text. This is a small formatting syntax for bold and links, not a full Markdown or HTML editor.
+
+Click a formatted token to open its selected source, or use **Show markup** for the whole field. **Hide markup** returns to the formatted view. Source mode intentionally keeps the characters visible while you edit. Completed formatting is an inline token; ordinary surrounding text stays directly editable. Backspace/Delete next to a token removes the token, and Ctrl/Cmd+Z restores it. Ctrl/Cmd+Shift+Z or Ctrl+Y redoes edits. Form resets and day changes start a fresh editor undo history. The separate daily-log Undo button still restores saved log changes.
+
+Copying inside a formatted field keeps the original markup in the plain-text clipboard so pasting it into another entry retains the formatting. Paste accepts text, preserving line breaks and spreadsheet tabs; it does not import arbitrary clipboard HTML. Existing character limits include markup. Unsaved single-update and batch drafts still save automatically; inline edits still need Save changes.
+
+Bold text and labelled links carry through the live preview, report, formatted report copy, and PDF. Readable-text copying omits completed bold markers and includes link destinations. Broken markup stays visible in the report too. This does not change Teams' own paste-and-send behavior.
 
 ## Links and Teams names
 

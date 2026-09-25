@@ -1,5 +1,5 @@
-import { reportData } from './model.mjs?v=3.8';
-import { linkParts } from './links.mjs?v=3.8';
+import { reportData } from './model.mjs?v=3.9';
+import { linkParts } from './links.mjs?v=3.9';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
@@ -11,23 +11,52 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
   const table = options => {
     const body = options.body.map(row => row.map(value => {
       let content = '';
-      const links = [];
+      const links = [], runs = [];
       for (const part of linkParts(value)) {
         const text = part.text.replace(/\r\n?|\n/g, '\n').replace(/[^\S\n]+/g, ' ');
         if (part.url) links.push({ start: content.length, end: content.length + text.length, url: part.url });
+        runs.push({ start: content.length, end: content.length + text.length, bold: part.bold, url: part.url });
         content += text;
       }
-      return { content, links };
+      return { content, links, runs, formatted: runs.some(run => run.bold) };
     }));
+    const parsedLines = new WeakMap();
+    const didParseCell = ({ cell, section }) => {
+      if (section !== 'body' || !cell.raw.formatted) return;
+      cell.raw.baseBold = cell.styles.fontStyle === 'bold';
+      // Reserve the bold face's width before AutoTable wraps and paginates.
+      cell.styles.fontStyle = 'bold';
+    };
+    const willDrawCell = ({ cell, section }) => {
+      if (section !== 'body' || !cell.raw.formatted) return;
+      parsedLines.set(cell, cell.text); cell.text = [];
+    };
     const didDrawCell = ({ cell, section }) => {
-      if (section !== 'body' || !cell.raw.links?.length) return;
+      if (section !== 'body' || (!cell.raw.links?.length && !cell.raw.formatted)) return;
+      if (parsedLines.has(cell)) cell.text = parsedLines.get(cell);
       const raw = cell.raw, position = cell.getTextPos();
       const height = doc.getLineHeight() / doc.internal.scaleFactor;
       let offset = linkOffsets.get(raw) || 0;
       cell.text.forEach((line, index) => {
         const start = raw.content.indexOf(line, offset);
         if (start < 0) return;
-        for (const link of raw.links) {
+        if (raw.formatted) {
+          let x = position.x;
+          for (const run of raw.runs) {
+            const from = Math.max(start, run.start), to = Math.min(start + line.length, run.end);
+            if (to <= from) continue;
+            const text = line.slice(from - start, to - start), y = position.y + index * height;
+            doc.setFont('NotoSans', run.bold || raw.baseBold ? 'bold' : 'normal');
+            doc.text(text, x, y + doc.getFontSize() / doc.internal.scaleFactor * 0.85);
+            const width = doc.getTextWidth(text);
+            if (run.url) {
+              doc.link(x, y, width, height, { url: run.url });
+              doc.setDrawColor(22, 93, 145); doc.setLineWidth(0.15);
+              doc.line(x, y + height * 0.85, x + width, y + height * 0.85);
+            }
+            x += width;
+          }
+        } else for (const link of raw.links) {
           const from = Math.max(start, link.start), to = Math.min(start + line.length, link.end);
           if (to <= from) continue;
           const x = position.x + doc.getTextWidth(line.slice(0, from - start));
@@ -43,7 +72,7 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
       // AutoTable reuses raw cells when a long row continues on another page.
       linkOffsets.set(raw, offset);
     };
-    const settings = { ...options, body, didDrawCell };
+    const settings = { ...options, body, didParseCell, willDrawCell, didDrawCell };
     return libraries.autoTable ? libraries.autoTable(doc, settings) : doc.autoTable(settings);
   };
   for (const style of ['regular', 'bold']) {

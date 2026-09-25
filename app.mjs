@@ -1,8 +1,9 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.8';
-import { buildReportPdf } from './pdf.mjs?v=3.8';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables } from './model.mjs?v=3.8';
-import { previewDraft } from './preview.mjs?v=3.8';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=3.8';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.9';
+import { buildReportPdf } from './pdf.mjs?v=3.9';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables } from './model.mjs?v=3.9';
+import { previewDraft } from './preview.mjs?v=3.9';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=3.9';
+import { refreshFormatting, sourceField } from './editor.mjs?v=3.9';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -85,7 +86,7 @@ function renderTasks() {
     const number = tasks.indexOf(task) + 1, draft = inlineEdits.get(editKey(task.id));
     const statusClass = task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
     const context = [task.category || 'Uncategorized', task.area, task.ticketId ? `Ticket ${task.ticketId}` : ''].filter(Boolean).join(' · ');
-    const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(taskName(task))}"${selectedTasks.has(task.id) ? ' checked' : ''}>Entry ${number}</label>`;
+    const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(displayText(taskName(task)))}"${selectedTasks.has(task.id) ? ' checked' : ''}>Entry ${number}</label>`;
     const actions = `<div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}" aria-label="Edit entry ${number}">Edit here</button>${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
     return `<article class="task-card ${statusClass}">${selection}${draft ? inlineEditor(task, draft, number) : `<div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3></div>${task.status ? `<span class="status ${statusClass}">${esc(task.status)}</span>` : ''}</div>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : ''}</div>${actions}`}</article>`;
   }).join('')}`).join('');
@@ -107,6 +108,7 @@ function currentInlineTask(id) {
   return { ...original, title: draft.title.trim(), category: draft.category, area: draft.area.trim(), status: draft.status, ...(original.entryType === 'quick' ? { summary: draft.progress.trim() } : { notes: draft.progress.trim() }) };
 }
 function renderLivePreview() {
+  refreshFormatting();
   if ($('task-dialog').open) previewContext = { kind: 'task' };
   else if (previewContext.kind === 'task' || (previewContext.kind === 'inline' && !inlineEdits.has(editKey(previewContext.id)))) previewContext = { kind: 'log' };
   const { kind, id } = previewContext;
@@ -170,7 +172,7 @@ function renderCarryList() {
     const already = day().tasks.some(item => item.carriedFrom === `${source.date}:${task.id}`) || ticketMatches(day().tasks, task).length;
     const untitled = task.entryType === 'quick' && !task.title;
     const note = already ? 'Already in this day’s log' : untitled ? 'Add a short title in the original day first' : [task.category, task.area].filter(Boolean).join(' · ');
-    return `<label class="carry-choice check-label"><input type="checkbox" data-carry-id="${esc(task.id)}"${already || untitled ? ' disabled' : ''}><span>${esc(taskName(task))}<span class="small muted">${esc(note)}</span></span></label>`;
+    return `<label class="carry-choice check-label"><input type="checkbox" data-carry-id="${esc(task.id)}"${already || untitled ? ' disabled' : ''}><span>${esc(displayText(taskName(task)))}<span class="small muted">${esc(note)}</span></span></label>`;
   }).join('') : '<p class="small muted">No unfinished entries on this day. Updates without a status can be selected manually.</p>';
   $('save-carry').disabled = true;
   $('carry-error').hidden = true;
@@ -235,11 +237,11 @@ function syncReviewDecision(element, index, reset = false) {
   if (reset && signature !== element.dataset.matches && row.action !== 'skip') { row.action = matches.length ? '' : 'add'; row.targetId = ''; }
   element.dataset.matches = signature;
   const choice = row.action === 'update' ? `update:${row.targetId}` : row.action;
-  element.querySelector('[data-field="action"]').innerHTML = `${matches.length || !row.action ? '<option value="">Choose how to save</option>' : ''}<option value="add">${matches.length ? 'Add separate work' : 'Add new update'}</option>${matches.map(task => `<option value="update:${esc(task.id)}">Update entry ${day().tasks.indexOf(task) + 1}: ${esc(taskName(task).slice(0, 100))}</option>`).join('')}<option value="skip">Skip this update</option>`;
+  element.querySelector('[data-field="action"]').innerHTML = `${matches.length || !row.action ? '<option value="">Choose how to save</option>' : ''}<option value="add">${matches.length ? 'Add separate work' : 'Add new update'}</option>${matches.map(task => `<option value="update:${esc(task.id)}">Update entry ${day().tasks.indexOf(task) + 1}: ${esc(displayText(taskName(task)).slice(0, 100))}</option>`).join('')}<option value="skip">Skip this update</option>`;
   element.querySelector('[data-field="action"]').value = choice;
   element.querySelector('[data-field="title"]').required = row.action !== 'skip';
   element.querySelector('.paste-match').textContent = matches.length ? `${matches.length === 1 ? 'Ticket already in today’s log.' : 'Several entries use this ticket.'} Updating replaces its title and progress; original request, quantities, and status stay as saved.` : row.action === 'skip' ? 'Skipped. Choose Add new update if this is separate work.' : '';
-  element.querySelector('.paste-current').textContent = matches.map(task => `Entry ${day().tasks.indexOf(task) + 1}: ${taskSummary(task).slice(0, 350)}${taskSummary(task).length > 350 ? '…' : ''}`).join('\n\n');
+  element.querySelector('.paste-current').textContent = matches.map(task => `Entry ${day().tasks.indexOf(task) + 1}: ${displayText(taskSummary(task)).slice(0, 350)}${taskSummary(task).length > 350 ? '…' : ''}`).join('\n\n');
 }
 function renderPasteReview() {
   const review = day().pasteReview;
@@ -733,7 +735,7 @@ $('clear-teams').addEventListener('click', () => { $('teams-target').value = '';
 
 let lastLinkField = null, linkFields = [], linkRanges = [];
 for (const id of ['shift-supervisor', 'shift-lead', 'shift-crew', 'update-title', 'update-description', 'quick-notes', 'task-title', 'task-description', 'task-notes']) $(id).dataset.linkable = '';
-document.addEventListener('focusin', event => { if (event.target.matches('[data-linkable]')) lastLinkField = event.target; });
+document.addEventListener('focusin', event => { const field = sourceField(event.target); if (field.matches('[data-linkable]')) lastLinkField = field; });
 function updateLinkHelp() {
   const person = $('link-type').value === 'person';
   $('link-value-label').textContent = person ? 'Work email / Teams sign-in name' : 'Link address';
