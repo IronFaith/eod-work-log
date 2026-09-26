@@ -1,15 +1,18 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.11';
-import { buildReportPdf } from './pdf.mjs?v=3.11';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables, fillPasteReview, workCounts } from './model.mjs?v=3.11';
-import { previewDraft } from './preview.mjs?v=3.11';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=3.11';
-import { refreshFormatting, sourceField } from './editor.mjs?v=3.11';
+import { setupCrew } from './crew-ui.mjs?v=4.0';
+import { crewText } from './crew.mjs?v=4.0';
+import { workCsv } from './model.mjs?v=4.0';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=4.0';
+import { buildReportPdf } from './pdf.mjs?v=4.0';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=4.0';
+import { previewDraft } from './preview.mjs?v=4.0';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=4.0';
+import { refreshFormatting, sourceField } from './editor.mjs?v=4.0';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
-const selectedTasks = new Set(), inlineEdits = new Map();
+const selectedTasks = new Set(), inlineEdits = new Map(), expandedTasks = new Set();
 const editKey = id => `${activeDate}:${id}`;
-const categoryOptions = (value = '', auto = false) => `${auto ? '<option value="auto">Suggest from title / progress</option>' : ''}<option value="">Uncategorized</option>${CATEGORIES.map(category => `<option${category === value ? ' selected' : ''}>${esc(category)}</option>`).join('')}`;
+const categoryField = (value, attributes) => `<input list="category-options" maxlength="80" placeholder="Choose or type a category" value="${esc(value || '')}" ${attributes}>`;
 const livePreview = $('live-preview'), previewDesktop = window.matchMedia('(min-width:1200px)');
 let previewContext = { kind: 'log' }, composerMode = 'single', pasteReviewOpen = false;
 try {
@@ -23,6 +26,7 @@ try {
   $('save-state').classList.add('failed');
 }
 const day = () => ensureDay(state, activeDate);
+state.categories = categoryNames([...state.categories, ...Object.values(state.days).flatMap(value => value.tasks.map(task => task.category))]);
 const reportOptions = () => ({ detailed: $('report-detail').checked });
 const quickOptions = () => ({ mode: $('quick-mode').value, headers: $('quick-table-headers').checked });
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
@@ -34,6 +38,8 @@ function toast(message) {
 }
 function persist(markDay = true) {
   if (markDay) day().updatedAt = new Date().toISOString();
+  state.categories = categoryNames([...state.categories, ...day().tasks.map(task => task.category)]);
+  refreshCategoryChoices();
   if (storageLocked) return false;
   try {
     localStorage.setItem(STORAGE_KEY, exportBackup(state));
@@ -51,16 +57,21 @@ function persist(markDay = true) {
 }
 function summary() {
   const header = day().header;
-  $('shift-summary').textContent = displayText([header.location, header.lead.trim() ? `Lead: ${header.lead.trim()}` : ''].filter(Boolean).join(' · ')) || 'Set up your day';
+  $('shift-summary').textContent = displayText(header.location) || 'Times, location, and crew for this day';
+  $('shift-time-note').textContent = header.start || header.end ? shiftLabel(header) : 'Choose a start time and shift length to fill the end time.';
+  $('work-shift-summary').textContent = header.start && header.end ? `${shiftLabel(header)}${header.location ? ` · ${displayText(header.location)}` : ''} · Edit shift & crew` : 'Set up shift & crew';
 }
 function renderHeader() {
   $('report-date').value = activeDate;
   $('date-caption').textContent = dateLabel(activeDate);
-  $('page-title').textContent = activeTab === 'report' ? 'Your EOD report' : activeTab === 'history' ? 'Every day, kept.' : activeDate === localDate() ? 'Today’s work' : 'Day’s work';
+  $('page-title').textContent = activeTab === 'report' ? 'Your EOD report' : activeTab === 'history' ? 'Every day, kept.' : activeTab === 'shift' ? 'Shift & crew' : activeTab === 'crew' ? 'Crew library' : activeTab === 'entry' ? 'Add work' : activeDate === localDate() ? 'Today’s work' : 'Day’s work';
   $('day-eyebrow').textContent = activeTab === 'history' ? 'Your work, in order' : 'Your daily record';
 }
 function fillDay() {
   renderTeamsShortcut();
+  refreshCategoryChoices(); renderShiftPresets();
+  $('shift-duration').value = day().shiftDuration;
+  $('shift-preset-message').textContent = '';
   composerMode = day().quickDraft.trim() || day().pasteReview?.rows.length ? 'paste' : 'single';
   pasteReviewOpen = !!day().pasteReview?.rows.length;
   $('batch-fill').open = !!Object.values(day().pasteReview?.shared || {}).some(Boolean);
@@ -72,13 +83,14 @@ function fillDay() {
   $('carryover').value = day().carryover;
   $('update-title').value = day().updateTitleDraft;
   $('update-description').value = day().updateDescriptionDraft;
-  $('update-category').value = day().updateCategoryDraft;
+  $('update-category').value = day().updateCategoryAuto ? '' : day().updateCategoryDraft;
   $('update-area').value = day().updateAreaDraft;
   updateTitleButton();
   $('quick-notes').value = day().quickDraft;
   $('quick-mode').value = day().quickMode;
   $('quick-table-headers').checked = day().quickTableHeaders;
   updateQuickButton();
+  renderShiftCrew();
   summary();
   renderHeader();
   renderTasks();
@@ -92,6 +104,7 @@ function syncComposer() {
   document.querySelectorAll('[data-composer]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.composer === composerMode)));
   $('single-draft-badge').hidden = !day().updateTitleDraft.trim() && !day().updateDescriptionDraft.trim();
   $('paste-draft-badge').hidden = !day().quickDraft.trim() && !day().pasteReview?.rows.length;
+  $('resume-draft').hidden = $('single-draft-badge').hidden && $('paste-draft-badge').hidden;
 }
 function chooseComposer(mode, focus = true) {
   composerMode = mode;
@@ -102,22 +115,42 @@ function chooseComposer(mode, focus = true) {
 }
 function renderTasks() {
   const tasks = day().tasks;
+  refreshCategoryChoices();
+  const shown = visibleTasks();
   renderCounts();
-  $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'entry' : 'entries'} in your report` : 'Your updates will appear here.';
-  $('task-list').innerHTML = groupTasks(tasks, $('log-view').value).map(group => `${group.label ? `<h3 class="log-group">${esc(group.label)} <span class="small muted">${group.tasks.length}</span></h3>` : ''}${group.tasks.map(task => {
+  $('task-count').textContent = tasks.length ? `${shown.length} of ${tasks.length} ${tasks.length === 1 ? 'entry' : 'entries'} shown` : 'Add your first ticket or update.';
+  $('work-columns').hidden = !shown.length;
+  $('task-list').innerHTML = groupTasks(shown, $('log-view').value).map(group => `${group.label ? `<h3 class="log-group">${esc(group.label)} <span class="small muted">${group.tasks.length}</span></h3>` : ''}${group.tasks.map(task => {
     const number = tasks.indexOf(task) + 1, draft = inlineEdits.get(editKey(task.id));
     const statusClass = task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
     const context = [task.category || 'Uncategorized', task.area, task.ticketId ? `Ticket ${task.ticketId}` : ''].filter(Boolean).join(' · ');
-    const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(displayText(taskName(task)))}"${selectedTasks.has(task.id) ? ' checked' : ''}>Entry ${number}</label>`;
+    const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(displayText(taskName(task)))}"${selectedTasks.has(task.id) ? ' checked' : ''}></label>`;
     const actions = `<div class="task-actions"><button class="text-button" data-action="edit" data-id="${esc(task.id)}" aria-label="Edit entry ${number}">Edit here</button>${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
-    return `<article class="task-card ${statusClass}">${selection}${draft ? inlineEditor(task, draft, number) : `<div class="task-content"><div class="task-top"><div><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3></div>${task.status ? `<span class="status ${statusClass}">${esc(task.status)}</span>` : ''}</div>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : ''}</div>${actions}`}</article>`;
-  }).join('')}`).join('');
+    return `<article class="task-card compact-task ${statusClass}"><div class="work-list-row">${selection}<button class="work-title" data-action="expand" data-id="${esc(task.id)}" aria-expanded="${expandedTasks.has(task.id)}" aria-label="View entry ${number}: ${esc(displayText(taskName(task)))}">${esc(displayText(taskName(task)))}</button><span class="work-category" data-label="Category">${esc(task.category || 'Uncategorized')}</span><span class="work-area" data-label="Row / area">${esc(task.area || '—')}</span><span class="work-status" data-label="Status">${esc(task.status || '—')}</span><button class="text-button" data-action="edit" data-id="${esc(task.id)}" aria-label="Edit entry ${number}">Edit</button></div>${draft ? inlineEditor(task, draft, number) : expandedTasks.has(task.id) ? `<div class="task-content"><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : '<p class="small muted">No description added.</p>'}</div>${actions}` : ''}</article>`;
+  }).join('')}`).join('') || `<div class="empty-state"><p>${tasks.length ? 'No entries match. Clear the filters to see all work.' : 'Your work will appear here. Use Add work to get started.'}</p></div>`;
   $('undo-log').disabled = !day().undo;
   $('undo-log').title = day().undo ? `Undo: ${day().undo.label}` : 'No log change to undo';
   updateSelection();
   if (!$('carry-panel').hidden) renderCarryList();
   renderPasteReview();
   renderLivePreview();
+}
+function refreshCategoryChoices() {
+  $('category-options').innerHTML = categoryNames([...CATEGORIES, ...state.categories]).map(name => `<option value="${esc(name)}"></option>`).join('');
+  const previous = $('work-category').value;
+  $('work-category').innerHTML = '<option value="all">All categories</option>' + groupTasks(day().tasks).map(group => `<option value="${esc(JSON.stringify(group.tasks[0].category || ''))}">${esc(group.label)}</option>`).join('');
+  $('work-category').value = [...$('work-category').options].some(option => option.value === previous) ? previous : 'all';
+}
+function visibleTasks() {
+  const selected = $('work-category').value;
+  const filtered = filterTasks(day().tasks, { query: $('work-search').value, category: selected === 'all' ? null : JSON.parse(selected) });
+  return day().tasks.filter(task => filtered.includes(task) || inlineEdits.has(editKey(task.id)));
+}
+function renderShiftPresets() {
+  const previous = $('shift-preset').value;
+  $('shift-preset').innerHTML = '<option value="">Choose a saved preset</option>' + state.shiftPresets.map(preset => `<option value="${esc(preset.id)}">${esc(preset.name)}</option>`).join('');
+  $('shift-preset').value = state.shiftPresets.some(preset => preset.id === previous) ? previous : '';
+  $('apply-shift-preset').disabled = !$('shift-preset').value;
 }
 function renderCounts() {
   const counts = workCounts(day().tasks, day().countBy);
@@ -128,7 +161,7 @@ function renderCounts() {
 }
 function currentSingleTask() {
   const title = $('update-title').value.trim(), summary = $('update-description').value.trim();
-  const category = $('update-category').value === 'auto' ? suggestCategory(`${title}\n${summary}`) : $('update-category').value;
+  const category = day().updateCategoryAuto ? suggestCategory(`${title}\n${summary}`) : $('update-category').value;
   return { ...nextTask(), entryType: 'quick', title, summary, category, area: $('update-area').value.trim(), status: '' };
 }
 function currentInlineTask(id) {
@@ -151,6 +184,11 @@ function renderLivePreview() {
     if (host.matches('.inline-editor')) host.querySelector('.inline-error').before(livePreview);
     else host.append(livePreview);
   }
+  if (kind === 'inline') {
+    const form = [...$('task-list').querySelectorAll('[data-edit-id]')].find(form => form.dataset.editId === id);
+    if (form && livePreview.parentElement !== form) form.querySelector('.inline-error').before(livePreview);
+  }
+  livePreview.hidden = kind === 'log' || (!['entry', 'today'].includes(activeTab) && kind !== 'task');
   const detailed = reportOptions().detailed;
   livePreview.querySelectorAll('[data-preview-format]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.previewFormat === 'detailed') === detailed)));
   $('live-preview-table').classList.toggle('preview-detailed', detailed);
@@ -183,15 +221,16 @@ function renderLivePreview() {
   $('live-preview-notice').hidden = !notice;
 }
 function inlineEditor(task, draft, number) {
-  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-linkable data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-linkable data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category<select data-inline-field="category">${categoryOptions(draft.category)}</select></label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label>${task.entryType !== 'quick' ? `<label>Status<select data-inline-field="status">${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
+  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-linkable data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-linkable data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category${categoryField(draft.category, 'data-inline-field="category"')}</label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label>${task.entryType !== 'quick' ? `<label>Status<select data-inline-field="status">${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
 }
 function updateSelection() {
   for (const id of selectedTasks) if (!day().tasks.some(task => task.id === id)) selectedTasks.delete(id);
   const count = selectedTasks.size;
   $('selected-count').textContent = count ? `${count} selected` : '';
-  $('select-all').checked = count > 0 && count === day().tasks.length;
-  $('select-all').indeterminate = count > 0 && count < day().tasks.length;
-  $('select-all').disabled = !day().tasks.length;
+  const visible = visibleTasks();
+  $('select-all').checked = !!visible.length && visible.every(task => selectedTasks.has(task.id));
+  $('select-all').indeterminate = count > 0 && !$('select-all').checked;
+  $('select-all').disabled = !visible.length;
   $('bulk-form').hidden = !count;
   $('save-bulk').disabled = !count || (!$('bulk-category-apply').checked && !$('bulk-area-apply').checked);
 }
@@ -211,7 +250,7 @@ function updateTitleButton() {
   syncComposer();
   $('save-update').disabled = !$('update-title').value.trim();
   const suggestion = suggestCategory(`${$('update-title').value}\n${$('update-description').value}`);
-  $('update-category').querySelector('[value="auto"]').textContent = suggestion ? `Suggested: ${suggestion}` : 'Suggest from title / progress';
+  $('update-category').placeholder = day().updateCategoryAuto && suggestion ? `Suggested: ${suggestion}` : 'Choose or type a category';
   $('update-error').hidden = true;
 }
 function addTitledUpdate(event) {
@@ -222,14 +261,15 @@ function addTitledUpdate(event) {
     if (day().tasks.length >= 1000) throw new Error('Use up to 1,000 entries per day.');
     const task = validateTask(currentSingleTask());
     replaceTasks(day(), [...day().tasks, task], 'Add update');
+    resetWorkFilters();
     day().updateTitleDraft = '';
     day().updateDescriptionDraft = '';
-    day().updateCategoryDraft = 'auto'; day().updateAreaDraft = '';
+    day().updateCategoryDraft = 'auto'; day().updateCategoryAuto = true; day().updateAreaDraft = '';
     const saved = persist();
     $('update-form').reset();
     previewContext = { kind: 'log' };
     updateTitleButton(); renderTasks();
-    $('update-title').focus();
+    showTab('today');
     toast(saved ? 'Update added' : 'Update added — export a backup to keep it');
   } catch (error) { $('update-error').textContent = error.message; $('update-error').hidden = false; }
 }
@@ -242,6 +282,7 @@ function updateQuickButton() {
     tickets: 'Paste tk28493 tk83939 tk939393 — each ID gets its own entry. Spaces, commas, and new lines work. To include a description, use “tk28493 | Checked link” on its own line.',
     single: 'Paste one ticket or note. Its lines stay together; trim the details in the next step.',
     blocks: 'Leave a blank line between tickets or notes. Lines within each block stay together.',
+    csv: 'Columns: Title, Description, Category, Area. Review before saving. Extra columns stay in the description.',
     table: 'Copy cells from Excel or a tab-separated table. Each row becomes an update. Check whether you copied column names.'
   };
   $('quick-help').textContent = tips[mode];
@@ -287,7 +328,7 @@ function renderPasteReview() {
   $('paste-title').textContent = `Review ${review.rows.length} ${review.rows.length === 1 ? 'update' : 'updates'}`;
   $('batch-fill').hidden = review.rows.length < 2;
   $('paste-shared-description').value = review.shared?.summary || ''; $('paste-shared-category').value = review.shared?.category || ''; $('paste-shared-area').value = review.shared?.area || '';
-  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category<select data-field="category" aria-label="Update ${index + 1} category">${categoryOptions(row.category)}</select></label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Current saved entry</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Current saved entry</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
   [...$('paste-list').children].forEach((element, index) => syncReviewDecision(element, index));
   updatePasteButton();
 }
@@ -339,13 +380,16 @@ function showTab(tab, scroll = true) {
     return;
   }
   activeTab = tab;
-  for (const name of ['today', 'report', 'history']) $(`${name}-panel`).hidden = name !== tab;
+  for (const name of ['today', 'shift', 'entry', 'crew', 'report', 'history']) $(`${name}-panel`).hidden = name !== tab;
   document.querySelectorAll('[data-tab]').forEach(button => {
-    if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page');
+    if (button.dataset.tab === (tab === 'entry' ? 'today' : tab === 'crew' ? 'shift' : tab)) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
   renderHeader();
-  if (tab === 'report') renderReportView();
+  if (tab === 'report') { $('report-blockers').open = day().blockerState === 'Not reviewed' || day().blockerState === 'Reported'; renderReportView(); }
+  if (tab === 'crew') renderRoster();
+  if (tab === 'shift') renderShiftCrew();
+  renderLivePreview();
   if (tab === 'history') renderHistory();
   if (scroll) window.scrollTo({ top: 0 });
 }
@@ -353,15 +397,16 @@ function chooseDate(date) {
   try { ensureDay(state, date); } catch { $('report-date').value = activeDate; return; }
   activeDate = date;
   previewContext = { kind: 'log' };
-  selectedTasks.clear();
+  selectedTasks.clear(); expandedTasks.clear();
+  $('work-search').value = ''; $('work-category').value = 'all';
   $('carry-panel').hidden = true; $('bring-forward').setAttribute('aria-expanded', 'false');
   fillDay();
-  if (activeTab === 'history') showTab('today');
+  if (['history', 'entry', 'crew'].includes(activeTab)) showTab('today');
   else showTab(activeTab, false);
 }
 
 for (const [id, values] of [['task-kind', KINDS], ['task-status', STATUSES], ['task-unit', UNITS]]) $(id).innerHTML = values.map(value => `<option>${esc(value)}</option>`).join('');
-for (const id of ['update-category', 'task-category', 'bulk-category', 'paste-shared-category']) $(id).innerHTML = categoryOptions('', ['update-category', 'task-category'].includes(id));
+refreshCategoryChoices();
 const entryType = () => document.querySelector('[name="entry-type"]:checked').value;
 function syncCustom() {
   const field = entryType() === 'field';
@@ -392,7 +437,8 @@ function openTask(task, edit = false) {
   $('task-form').reset();
   document.querySelectorAll('[name="entry-type"]').forEach(input => { input.checked = input.value === (task.entryType || 'field'); });
   for (const [field, property] of [['title', 'title'], ['ticket', 'ticketId'], ['description', 'description'], ['kind', 'kind'], ['status', 'status'], ['custom', 'custom'], ['area', 'area'], ['zend', 'zEnd'], ['quantity', 'quantity'], ['unit', 'unit'], ['notes', 'notes']]) $(`task-${field}`).value = task[property] || '';
-  $('task-category').value = edit ? task.category || '' : task.category || 'auto';
+  $('task-category').value = task.category || '';
+  $('task-category').dataset.suggest = String(!edit && !task.category);
   syncCustom();
   renderBreakdown(task.breakdown);
   $('breakdown-details').open = !!task.breakdown.length;
@@ -402,7 +448,7 @@ function openTask(task, edit = false) {
   (entryType() === 'field' ? (task.kind === 'Custom task' ? $('task-custom') : $('task-area')) : $('task-title')).focus();
 }
 function currentDetailedTask() {
-  const category = $('task-category').value === 'auto' ? suggestCategory([$('task-title').value, $('task-notes').value, entryType() === 'field' ? $('task-kind').value : ''].join('\n')) : $('task-category').value;
+  const category = $('task-category').dataset.suggest === 'true' && !$('task-category').value ? suggestCategory([$('task-title').value, $('task-notes').value, entryType() === 'field' ? $('task-kind').value : ''].join('\n')) : $('task-category').value;
   return { ...day().tasks.find(value => value.id === editingTask), id: editingTask || crypto.randomUUID(), entryType: entryType(), title: $('task-title').value.trim(), ticketId: $('task-ticket').value.trim(), description: $('task-description').value.trim(), category, kind: $('task-kind').value, custom: $('task-custom').value.trim(), area: $('task-area').value.trim(), zEnd: $('task-zend').value.trim(), quantity: $('task-quantity').value, unit: $('task-unit').value, status: $('task-status').value, notes: $('task-notes').value.trim(), breakdown: collectBreakdown() };
 }
 function submitTask(event) {
@@ -414,9 +460,11 @@ function submitTask(event) {
     if (index >= 0) tasks[index] = task;
     else tasks.push(task);
     replaceTasks(day(), tasks, index >= 0 ? 'Edit task details' : 'Add task');
+    if (index < 0) resetWorkFilters();
     const saved = persist();
     $('task-dialog').close();
-    renderTasks();
+    previewContext = { kind: 'log' };
+    renderTasks(); showTab('today');
     toast(saved ? 'Task saved' : 'Task added — export a backup to keep it');
   } catch (error) {
     $('task-error').textContent = error.message;
@@ -534,16 +582,66 @@ async function importFile(file) {
   finally { $('backup-file').value = ''; }
 }
 
-for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).addEventListener('input', event => { day().header[key] = event.target.value; persist(); summary(); });
-$('save-defaults').addEventListener('click', () => { state.defaults = { ...day().header }; const saved = persist(); toast(saved ? 'Shift details saved for future days' : 'Could not save defaults. Export a backup.'); });
+function resetWorkFilters() { $('work-search').value = ''; $('work-category').value = 'all'; selectedTasks.clear(); }
+function openEntry() { showTab('entry'); chooseComposer(composerMode); }
+$('open-entry').addEventListener('click', openEntry);
+$('resume-draft').addEventListener('click', () => {
+  if (composerMode === 'single' && !day().updateTitleDraft.trim() && !day().updateDescriptionDraft.trim()) composerMode = 'paste';
+  else if (composerMode === 'paste' && !day().quickDraft.trim() && !day().pasteReview?.rows.length) composerMode = 'single';
+  openEntry();
+});
+$('close-entry').addEventListener('click', () => showTab('today'));
+for (const id of ['work-search', 'work-category']) $(id).addEventListener(id === 'work-search' ? 'input' : 'change', () => { selectedTasks.clear(); renderTasks(); });
+$('clear-filters').addEventListener('click', () => { resetWorkFilters(); renderTasks(); });
+$('task-category').addEventListener('input', () => { $('task-category').dataset.suggest = 'false'; });
+function fillShift() {
+  for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).value = day().header[key];
+  $('shift-duration').value = day().shiftDuration;
+  renderShiftCrew(); summary(); refreshFormatting();
+}
+for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).addEventListener('input', event => {
+  day().header[key] = event.target.value;
+  if (key === 'crew') $('export-shift-crew').disabled = !day().crewMembers.length && !event.target.value.trim();
+  if (key === 'start' && day().shiftDuration && event.target.value) $('shift-end').value = day().header.end = shiftEnd(event.target.value, day().shiftDuration).end;
+  if (key === 'end') $('shift-duration').value = day().shiftDuration = '';
+  persist(); summary();
+});
+$('shift-duration').addEventListener('change', () => {
+  day().shiftDuration = $('shift-duration').value;
+  if (day().shiftDuration && day().header.start) $('shift-end').value = day().header.end = shiftEnd(day().header.start, day().shiftDuration).end;
+  persist(); summary();
+});
+$('shift-preset').addEventListener('change', () => { $('apply-shift-preset').disabled = !$('shift-preset').value; });
+$('apply-shift-preset').addEventListener('click', () => {
+  const preset = state.shiftPresets.find(value => value.id === $('shift-preset').value);
+  if (!preset) return;
+  day().header = { ...preset.header }; day().shiftDuration = preset.duration; day().crewMembers = structuredClone(preset.crewMembers);
+  const saved = persist(); fillShift();
+  $('shift-preset-name').value = preset.name;
+  toast(saved ? `${preset.name} applied to this date` : 'Setup applied — export a backup to keep it');
+});
+$('save-shift-preset').addEventListener('click', () => {
+  try {
+    const name = $('shift-preset-name').value.trim(), existing = state.shiftPresets.find(preset => preset.name.toLowerCase() === name.toLowerCase());
+    if (!existing && state.shiftPresets.length >= 50) throw new Error('Use up to 50 saved shift presets.');
+    const preset = shiftPreset({ id: existing?.id, name, duration: day().shiftDuration, header: day().header, crewMembers: day().crewMembers });
+    state.shiftPresets = [...state.shiftPresets.filter(value => value.id !== preset.id), preset];
+    const saved = persist(false); renderShiftPresets();
+    $('shift-preset').value = preset.id; $('apply-shift-preset').disabled = false;
+    $('shift-preset-message').classList.remove('danger-text');
+    $('shift-preset-message').textContent = saved ? `Saved ${preset.name}, including this crew.` : 'Preset created — export a backup to keep it.';
+  } catch (error) { $('shift-preset-message').textContent = error.message; $('shift-preset-message').classList.add('danger-text'); }
+});
+$('save-defaults').addEventListener('click', () => { state.defaults = { ...day().header }; state.defaultShiftDuration = day().shiftDuration; state.defaultCrewMembers = structuredClone(day().crewMembers); const saved = persist(); toast(saved ? 'Shift details and crew saved for future days' : 'Could not save defaults. Export a backup.'); });
 $('report-date').addEventListener('change', event => chooseDate(event.target.value));
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab)));
 $('review-report').addEventListener('click', () => showTab('report'));
 $('review-details').addEventListener('click', () => {
-  showTab('today');
-  $('shift-details').open = true;
-  if (day().updateTitleDraft.trim() || day().updateDescriptionDraft.trim()) chooseComposer('single');
-  else if (day().quickDraft?.trim() || day().pasteReview?.rows.length) chooseComposer('paste');
+  if (!day().header.start || !day().header.end || !day().header.location.trim() || !day().header.supervisor.trim() || !crewText(day()).trim()) return showTab('shift');
+  if (day().updateTitleDraft.trim() || day().updateDescriptionDraft.trim()) { showTab('entry'); return chooseComposer('single'); }
+  if (day().quickDraft?.trim() || day().pasteReview?.rows.length) { showTab('entry'); return chooseComposer('paste'); }
+  if (!day().tasks.length) return openEntry();
+  $('report-blockers').open = true; $('report-blockers').scrollIntoView({ block: 'start' });
 });
 $('go-today').addEventListener('click', () => { chooseDate(localDate()); showTab('today'); });
 $('history-list').addEventListener('click', event => { const button = event.target.closest('[data-date]'); if (button) chooseDate(button.dataset.date); });
@@ -551,7 +649,7 @@ $('add-task').addEventListener('click', () => openTask(nextTask()));
 document.querySelectorAll('[data-composer]').forEach(button => button.addEventListener('click', () => chooseComposer(button.dataset.composer)));
 $('update-form').addEventListener('submit', addTitledUpdate);
 for (const [id, field] of [['update-title', 'updateTitleDraft'], ['update-description', 'updateDescriptionDraft'], ['update-category', 'updateCategoryDraft'], ['update-area', 'updateAreaDraft']]) {
-  $(id).addEventListener('input', () => { day()[field] = $(id).value; persist(); updateTitleButton(); });
+  $(id).addEventListener('input', () => { day()[field] = $(id).value; if (id === 'update-category') day().updateCategoryAuto = false; persist(); updateTitleButton(); });
   $(id).addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.isComposing) {
       event.preventDefault();
@@ -621,13 +719,14 @@ $('paste-form').addEventListener('submit', event => {
     const tasks = applyPasteReview(day().tasks, rows);
     const added = rows.filter(row => row.action === 'add').length, updated = rows.filter(row => row.action === 'update').length;
     if (added || updated) replaceTasks(day(), tasks, 'Save pasted updates');
+    if (added || updated) resetWorkFilters();
     day().quickDraft = ''; day().pasteReview = null;
     pasteReviewOpen = false;
     previewContext = { kind: 'log' };
     const saved = persist();
     $('quick-notes').value = '';
     updateQuickButton(); renderTasks();
-    $('quick-notes').focus();
+    showTab('today');
     toast(saved ? `${added} added · ${updated} updated` : 'Log changed — export a backup to keep it');
   } catch (error) { $('paste-error').textContent = error.message; $('paste-error').hidden = false; }
 });
@@ -645,6 +744,7 @@ $('task-list').addEventListener('click', event => {
   if (!button) return;
   const task = day().tasks.find(value => value.id === button.dataset.id);
   if (!task) return;
+  if (button.dataset.action === 'expand') { if (expandedTasks.has(task.id)) expandedTasks.delete(task.id); else expandedTasks.add(task.id); renderTasks(); return; }
   if (button.dataset.action === 'edit') {
     previewContext = { kind: 'inline', id: task.id };
     inlineEdits.set(editKey(task.id), { title: task.title, progress: task.entryType === 'quick' ? task.summary : task.notes, category: task.category || '', area: task.area, status: task.status });
@@ -695,7 +795,7 @@ for (const id of ['count-by', 'show-counts']) $(id).addEventListener('change', (
   day().countBy = $('count-by').value; day().showCounts = $('show-counts').checked;
   persist(); renderCounts();
 });
-$('select-all').addEventListener('change', event => { selectedTasks.clear(); if (event.target.checked) day().tasks.forEach(task => selectedTasks.add(task.id)); renderTasks(); });
+$('select-all').addEventListener('change', event => { selectedTasks.clear(); if (event.target.checked) visibleTasks().forEach(task => selectedTasks.add(task.id)); renderTasks(); });
 $('clear-selection').addEventListener('click', () => { selectedTasks.clear(); renderTasks(); });
 for (const field of ['category', 'area']) $(`bulk-${field}-apply`).addEventListener('change', event => { $(`bulk-${field}`).disabled = !event.target.checked; updateSelection(); });
 $('bulk-form').addEventListener('submit', event => {
@@ -736,8 +836,8 @@ $('save-carry').addEventListener('click', () => {
   } catch (error) { $('carry-error').textContent = error.message; $('carry-error').hidden = false; }
 });
 window.addEventListener('beforeunload', event => { if (inlineEdits.size) { event.preventDefault(); event.returnValue = ''; } });
-document.querySelectorAll('[name="blocker-state"]').forEach(input => input.addEventListener('change', () => { day().blockerState = input.value; $('blocker-label').hidden = input.value !== 'Reported'; persist(); }));
-for (const key of ['blockers', 'carryover']) $(key).addEventListener('input', event => { day()[key] = event.target.value; persist(); });
+document.querySelectorAll('[name="blocker-state"]').forEach(input => input.addEventListener('change', () => { day().blockerState = input.value; $('blocker-label').hidden = input.value !== 'Reported'; persist(); renderReportView(); }));
+for (const key of ['blockers', 'carryover']) $(key).addEventListener('input', event => { day()[key] = event.target.value; persist(); renderReportView(); });
 $('copy-rich').addEventListener('click', () => copyReport(true));
 $('copy-table').addEventListener('click', copyTable);
 $('select-report').addEventListener('click', () => { selectReport(); shareStatus('Report selected. Use your device’s Copy command, or press Ctrl/Cmd+C.'); });
@@ -859,5 +959,22 @@ $('link-form').addEventListener('submit', event => {
     $('link-dialog').close(); field.focus();
   } catch (error) { $('link-error').textContent = error.message; $('link-error').hidden = false; }
 });
+const { renderRoster, renderShiftCrew } = setupCrew({ getState: () => state, day, persist, toast, showTab, downloadFile });
+$('export-work-csv').addEventListener('click', () => {
+  downloadFile(workCsv(day().tasks), `work-${activeDate}.csv`, 'text/csv;charset=utf-8');
+});
+$('work-csv-file').addEventListener('change', async event => {
+  const file = event.target.files[0]; if (!file) return;
+  try {
+    if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Save or clear your current pasted draft before importing a work CSV.');
+    if (file.size > 12000) throw new Error('Import up to 12,000 characters at a time. Split larger work lists into smaller CSV files.');
+    const source = await file.text();
+    const review = createPasteReview(day().tasks, source, { mode: 'csv', headers: true });
+    day().quickDraft = source; day().quickMode = 'csv'; day().quickTableHeaders = true; day().pasteReview = review;
+    $('quick-notes').value = source; $('quick-mode').value = 'csv'; $('quick-table-headers').checked = true;
+    composerMode = 'paste'; pasteReviewOpen = true; previewContext = { kind: 'review' };
+    persist(); renderPasteReview(); updateQuickButton(); renderLivePreview();
+  } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
+  event.target.value = '';
+});
 fillDay();
-if (day().header.location && day().header.crew) $('shift-details').open = false;

@@ -10,10 +10,11 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.11">
+  <link rel="stylesheet" href="styles.css?v=4.0">
+  <link rel="stylesheet" href="workflow.css?v=4.0">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.11"></script>
+  <script type="module" src="app.mjs?v=4.0"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -28,34 +29,61 @@
       <label class="date-control">Report date<input id="report-date" type="date" required aria-label="Report date"></label>
     </div>
 
-    <section id="today-panel" aria-label="Today">
-      <details id="shift-details" class="shift-card" open>
-        <summary><span><strong>Shift details</strong><span id="shift-summary" class="muted small">Set up your day</span></span><span class="disclosure" aria-hidden="true">⌄</span></summary>
+    <section id="today-panel" aria-label="Work">
+      <div class="work-home-top"><button id="work-shift-summary" class="shift-shortcut" data-tab="shift">Set up shift &amp; crew</button><div class="copy-actions"><button id="resume-draft" class="button secondary" type="button" hidden>Resume draft</button><button id="open-entry" class="button primary" type="button">Add work</button></div></div>
+        <div class="log-toolbar"><div><h2>Your entries</h2><p id="task-count" class="muted small"></p></div><details class="log-tools-menu"><summary>Log tools</summary><div class="log-tools"><button id="bring-forward" class="button secondary" type="button" aria-expanded="false" aria-controls="carry-panel">Bring work forward</button><button id="undo-log" class="button secondary" type="button" disabled>Undo last log change</button></div></details></div>
+        <details class="work-counts"><summary><span id="counts-total" class="counts-total"></span><span class="small muted">Count options</span></summary><div class="counts-controls"><label>Count entries by<select id="count-by"><option value="category">Category</option><option value="area">Row / area</option><option value="status">Status</option></select></label><label class="check-label"><input id="show-counts" type="checkbox" checked>Include counts in report &amp; PDF</label></div><div id="counts-breakdown" class="counts-breakdown"></div><p class="small muted">Counts saved entries, identified ticket IDs, and distinct row / area labels. Quantities and completion are separate.</p></details>
+        <section id="carry-panel" class="organize-panel" aria-labelledby="carry-title" hidden><h3 id="carry-title">Bring unfinished work forward</h3><p class="small muted">Select only work still open. Ticket details, category, and location carry over. Today’s progress and quantities start blank.</p><label>From day<select id="carry-date"></select></label><div id="carry-list"></div><div class="copy-actions"><button id="save-carry" class="button primary" type="button" disabled>Bring selected work forward</button><button id="close-carry" class="button secondary" type="button">Close</button></div><p id="carry-error" class="small danger-text" role="alert" hidden></p></section>
+        <div class="work-filters"><label>Find work<input id="work-search" type="search" placeholder="Search tickets, descriptions, or rows"></label><label>Category<select id="work-category"><option value="all">All categories</option></select></label><button id="clear-filters" class="text-button" type="button">Clear filters</button></div>
+        <div class="log-view-row"><label>Organize log<select id="log-view"><option value="all">All updates</option><option value="category">By category</option><option value="area">By row / area</option></select></label><label class="check-label"><input id="select-all" type="checkbox">Select all</label><span id="selected-count" class="small muted" role="status"></span></div>
+        <form id="bulk-form" class="organize-panel" hidden><p class="small muted">Apply either field to the selected entries. Unchecked fields stay as saved.</p><div class="fields two"><div><label class="check-label"><input id="bulk-category-apply" type="checkbox">Set category</label><input id="bulk-category" list="category-options" maxlength="80" aria-label="Category for selected entries" placeholder="Choose or type a category" disabled></div><div><label class="check-label"><input id="bulk-area-apply" type="checkbox">Set row / area</label><input id="bulk-area" aria-label="Row / area for selected entries" maxlength="200" placeholder="Blank clears the row / area" disabled></div></div><div class="copy-actions"><button id="save-bulk" class="button primary" type="submit" disabled>Apply to selected</button><button id="clear-selection" class="text-button" type="button">Clear selection</button></div></form>
+        <div id="work-columns" class="work-columns" aria-hidden="true"><span></span><span>Ticket / work</span><span>Category</span><span>Row / area</span><span>Status</span><span></span></div><div id="task-list"></div>
+      <div class="review-row"><span class="small muted">Ready to share?</span><button id="review-report" class="button secondary">Review report</button></div>
+    </section>
+    <section id="shift-panel" aria-label="Shift &amp; crew" hidden>
+      <section id="shift-details" class="shift-card">
+        <div class="shift-heading"><h2>Shift setup</h2><p id="shift-summary" class="muted small">Set up your day</p></div>
         <div class="shift-body">
+          <div class="preset-picker"><label>Saved shift<select id="shift-preset"><option value="">Choose a saved preset</option></select></label><button id="apply-shift-preset" class="button secondary" type="button" disabled>Use preset</button></div>
           <div class="fields two">
-            <label>Shift start<input id="shift-start" type="time"></label><label>Shift end<input id="shift-end" type="time"></label>
+            <label>Shift start<input id="shift-start" type="time"></label><label>Shift length<select id="shift-duration"><option value="">Custom times</option><option value="8">8 hours</option><option value="10">10 hours</option><option value="12">12 hours</option></select></label><label>Shift end<input id="shift-end" type="time"></label>
             <label>Location<input id="shift-location" autocomplete="off" placeholder="Building or work location" maxlength="200"></label>
             <label>Supervisor<input id="shift-supervisor" autocomplete="off" placeholder="Supervisor’s name" maxlength="200"></label>
             <label>Acting lead <span class="optional">optional</span><input id="shift-lead" autocomplete="off" placeholder="Leave blank if none" maxlength="200"></label>
-            <label>Crew<textarea id="shift-crew" rows="2" placeholder="Crew members’ names" maxlength="3000"></textarea></label>
+            <details id="legacy-crew" class="full legacy-crew"><summary>Additional names / existing crew text</summary><label>Names or notes not selected from the library<textarea id="shift-crew" rows="2" placeholder="One additional name per line" maxlength="3000"></textarea></label></details>
           </div>
+          <section class="shift-crew-section" aria-label="Crew for this shift"><div class="section-heading"><div><h3>This shift’s crew</h3><p id="shift-crew-count" class="small muted"></p></div><button id="choose-crew" class="button secondary" type="button">Choose members</button></div><div id="shift-crew-list" class="crew-chips"></div><div class="copy-actions"><button id="import-shift-crew" class="text-button" type="button">Import crew CSV / Excel paste</button><button id="export-shift-crew" class="text-button" type="button">Export this crew CSV</button></div></section>
+          <p id="shift-time-note" class="small muted" role="status"></p>
           <button class="text-button link-tool" type="button" data-insert-link>Link a crew name / supervisor</button>
           <div class="defaults-row"><button id="save-defaults" class="button secondary" type="button">Use these details for future days</button><p class="muted small">New days always start with fresh tasks and blockers.</p></div>
+          <details class="preset-save"><summary>Save this setup as a preset</summary><p class="small muted">Save the times, location, supervisor, and crew together.</p><label>Preset name<input id="shift-preset-name" maxlength="80" placeholder="12-hour nights"></label><button id="save-shift-preset" class="button secondary" type="button">Save preset</button></details>
+          <p id="shift-preset-message" class="small" role="status"></p>
         </div>
-      </details>
+      </section>
 
+      <button class="button primary" data-tab="today">Back to work</button>
+    </section>
+    <section id="crew-panel" aria-label="Crew library" hidden>
+      <div class="section-heading"><div><h2>Reusable crew library</h2><p class="small muted">Check members for this date. Your other shifts keep their own crew.</p></div><button id="crew-done" class="button primary" type="button">Done</button></div>
+      <div class="copy-actions"><button id="add-member" class="button secondary" type="button">Add member</button><button id="import-roster" class="button secondary" type="button">Import CSV / Excel paste</button><button id="export-roster" class="button secondary" type="button">Export library CSV</button><button id="undo-member-remove" class="text-button" type="button" hidden>Undo last removal</button></div>
+      <div class="work-filters"><label>Find a member<input id="roster-search" type="search" placeholder="Name, email, or team"></label><label>Team / shift group<select id="roster-group"><option value="">All teams / shift groups</option></select></label></div>
+      <p id="roster-summary" class="small muted"></p><div id="roster-list" class="roster-list"></div>
+      <p class="small muted">Library edits apply when you next add a member. Saved shifts and reports keep their crew details. Work emails create Teams chat links; they do not send notifications.</p>
+    </section>
+    <section id="entry-panel" aria-label="Add work" hidden>
+      <div class="entry-page-heading"><button id="close-entry" type="button" class="text-button">Back to work</button><span class="small muted">Unfinished entries stay saved as drafts.</span></div>
       <div class="work-preview-layout">
       <section class="work-section" aria-labelledby="tasks-title">
-        <div class="section-heading"><div><h2 id="tasks-title">Log your work</h2><p class="muted small">A title and a short result are enough. Paste a list when you have several tickets.</p></div></div>
+        <div class="section-heading"><div><h2 id="tasks-title">Add work</h2><p class="muted small">A title and a short result are enough. Paste a list when you have several tickets.</p></div></div>
         <div class="unified-composer">
         <div class="composer-switch" role="group" aria-label="Add work"><button type="button" data-composer="single" aria-pressed="true">Write an update<span id="single-draft-badge" hidden>Draft</span></button><button type="button" data-composer="paste" aria-pressed="false">Paste a list<span id="paste-draft-badge" hidden>Draft</span></button></div>
         <p id="paste-stale" class="notice" hidden>Your paste or grouping changed. Refresh review replaces your earlier review edits.</p>
         <form id="quick-form" class="quick-composer paste-composer" aria-label="Paste a list" hidden>
-          <label for="quick-notes">Paste your updates</label>
+          <div class="work-import"><label for="work-csv-file">Import work CSV<input id="work-csv-file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></label><span class="small muted">Or paste your existing notes below.</span></div><label for="quick-notes">Paste your updates</label>
           <textarea id="quick-notes" rows="4" maxlength="12000" placeholder="tk28493 tk83939 tk939393&#10;or paste the task notes you already have" aria-describedby="quick-help"></textarea>
           <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
           <div class="paste-setup">
-            <label>Separate into<select id="quick-mode"><option value="lines">One update per line</option><option value="tickets">Ticket IDs (spaces / commas)</option><option value="single">One whole ticket / note</option><option value="blocks">Separate by blank lines</option><option value="table">Spreadsheet rows (tabs)</option></select></label>
+            <label>Separate into<select id="quick-mode"><option value="lines">One update per line</option><option value="tickets">Ticket IDs (spaces / commas)</option><option value="single">One whole ticket / note</option><option value="blocks">Separate by blank lines</option><option value="table">Spreadsheet rows (tabs)</option><option value="csv">Work CSV table</option></select></label>
             <label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label>
           </div>
           <p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update.</p>
@@ -66,7 +94,7 @@
         <section id="paste-review" class="quick-composer" aria-labelledby="paste-title" hidden>
           <div class="review-heading"><h3 id="paste-title">Review your updates</h3><button id="cancel-paste" type="button" class="text-button">Edit paste</button></div>
           <form id="paste-form">
-            <details id="batch-fill" class="batch-fill"><summary>Shared details for this list <span class="optional">optional</span></summary><p class="small muted">Fill blank descriptions, categories, or areas once. Individual edits stay as entered.</p><label>Shared description<textarea id="paste-shared-description" data-linkable rows="2" maxlength="12000" placeholder="Checked links; all stable."></textarea></label><div class="fields two organize-fields"><label>Shared category<select id="paste-shared-category"></select></label><label>Shared row / area<input id="paste-shared-area" maxlength="200" placeholder="Row A"></label></div><button id="fill-paste" type="button" class="button secondary">Fill empty fields</button><p id="paste-fill-status" class="small muted" role="status"></p></details>
+            <details id="batch-fill" class="batch-fill"><summary>Shared details for this list <span class="optional">optional</span></summary><p class="small muted">Fill blank descriptions, categories, or areas once. Individual edits stay as entered.</p><label>Shared description<textarea id="paste-shared-description" data-linkable rows="2" maxlength="12000" placeholder="Checked links; all stable."></textarea></label><div class="fields two organize-fields"><label>Shared category<input id="paste-shared-category" list="category-options" maxlength="80" placeholder="Choose or type a category"></label><label>Shared row / area<input id="paste-shared-area" maxlength="200" placeholder="Row A"></label></div><button id="fill-paste" type="button" class="button secondary">Fill empty fields</button><p id="paste-fill-status" class="small muted" role="status"></p></details>
             <div id="paste-list"></div><div id="paste-preview-slot" class="preview-slot"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><p class="small muted">Ctrl/Cmd+Enter to save.</p><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
         </section>
         <form id="update-form" class="quick-composer single-composer" aria-label="Write an update">
@@ -77,34 +105,30 @@
           <textarea id="update-description" rows="3" maxlength="12000" placeholder="Replaced the patch cable; link stable." aria-describedby="update-description-help"></textarea>
           <p id="update-description-help" class="sr-only">Add the result, quantity, blocker, or next step if useful.</p>
           <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
-          <div class="fields two organize-fields"><label>Category <span class="optional">optional</span><select id="update-category"></select></label><label>Row / area <span class="optional">optional</span><input id="update-area" maxlength="200" placeholder="Row A, Rack 12…"></label></div>
+          <div class="fields two organize-fields"><label>Category <span class="optional">optional</span><input id="update-category" list="category-options" maxlength="80" placeholder="Choose or type a category"></label><label>Row / area <span class="optional">optional</span><input id="update-area" maxlength="200" placeholder="Row A, Rack 12…"></label></div>
           <div id="single-preview-slot" class="preview-slot"></div>
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
           <p id="update-error" class="small danger-text" role="alert" hidden></p>
         </form>
         </div>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
-        <div class="log-toolbar"><div><h3>Your daily log</h3><p id="task-count" class="muted small"></p></div><div class="log-tools"><button id="bring-forward" class="button secondary" type="button" aria-expanded="false" aria-controls="carry-panel">Bring work forward</button><button id="undo-log" class="button secondary" type="button" disabled>Undo last log change</button></div></div>
-        <section class="work-counts" aria-labelledby="counts-title"><h3 id="counts-title">Work counts</h3><p id="counts-total" class="counts-total" role="status"></p><div class="counts-controls"><label>Count entries by<select id="count-by"><option value="category">Category</option><option value="area">Row / area</option><option value="status">Status</option></select></label><label class="check-label"><input id="show-counts" type="checkbox" checked>Include counts in report &amp; PDF</label></div><div id="counts-breakdown" class="counts-breakdown"></div><p class="small muted">Counts saved entries, identified ticket IDs, and distinct row / area labels. Quantities and completion are separate.</p></section>
-        <section id="carry-panel" class="organize-panel" aria-labelledby="carry-title" hidden><h3 id="carry-title">Bring unfinished work forward</h3><p class="small muted">Select only work still open. Ticket details, category, and location carry over. Today’s progress and quantities start blank.</p><label>From day<select id="carry-date"></select></label><div id="carry-list"></div><div class="copy-actions"><button id="save-carry" class="button primary" type="button" disabled>Bring selected work forward</button><button id="close-carry" class="button secondary" type="button">Close</button></div><p id="carry-error" class="small danger-text" role="alert" hidden></p></section>
-        <div class="log-view-row"><label>Organize log<select id="log-view"><option value="all">All updates</option><option value="category">By category</option><option value="area">By row / area</option></select></label><label class="check-label"><input id="select-all" type="checkbox">Select all</label><span id="selected-count" class="small muted" role="status"></span></div>
-        <form id="bulk-form" class="organize-panel" hidden><p class="small muted">Apply either field to the selected entries. Unchecked fields stay as saved.</p><div class="fields two"><div><label class="check-label"><input id="bulk-category-apply" type="checkbox">Set category</label><select id="bulk-category" aria-label="Category for selected entries" disabled></select></div><div><label class="check-label"><input id="bulk-area-apply" type="checkbox">Set row / area</label><input id="bulk-area" aria-label="Row / area for selected entries" maxlength="200" placeholder="Blank clears the row / area" disabled></div></div><div class="copy-actions"><button id="save-bulk" class="button primary" type="submit" disabled>Apply to selected</button><button id="clear-selection" class="text-button" type="button">Clear selection</button></div></form>
-        <div id="task-list"></div>
+
       </section>
       <div id="live-preview-dock"><section id="live-preview" class="live-preview" aria-labelledby="live-preview-title"><div class="live-preview-heading"><div><p class="eyebrow">As you type</p><h3 id="live-preview-title">Live report preview</h3></div><span id="live-preview-state" class="status">Not saved</span></div><p id="live-preview-context" class="small muted"></p><div class="preview-format" role="group" aria-label="Report table format"><button type="button" data-preview-format="compact" aria-pressed="true">Compact</button><button type="button" data-preview-format="detailed" aria-pressed="false">Full details</button></div><p class="small muted preview-format-help">This also sets the format used in Report and PDF.</p><p id="live-preview-notice" class="small preview-notice" role="status" hidden></p><div id="live-preview-table" class="live-preview-table" tabindex="0" aria-label="Live production table"></div><p id="live-preview-help" class="small muted"></p></section></div>
       </div>
 
+    </section>
+
+    <section id="report-panel" aria-label="Report" hidden>
+      <div class="section-heading"><div><h2>Review &amp; share your EOD</h2><p class="muted small">Your logged updates, ready for your supervisor.</p></div></div>
+      <details id="report-blockers" class="report-blockers"><summary>Blockers &amp; next shift</summary>
       <section class="blockers-section" aria-labelledby="blockers-title">
         <div class="section-heading"><div><h2 id="blockers-title">Anything holding you up?</h2><p class="muted small">Confirm blockers before sharing your report.</p></div></div>
         <fieldset class="segmented"><legend class="sr-only">Blocker status</legend><label><input type="radio" name="blocker-state" value="Not reviewed" checked><span>Not reviewed</span></label><label><input type="radio" name="blocker-state" value="None"><span>None</span></label><label><input type="radio" name="blocker-state" value="Reported"><span>Report blocker</span></label></fieldset>
         <label id="blocker-label" class="blocker-input" hidden>Blocker details<textarea id="blockers" rows="3" placeholder="What is missing or blocked? Include lengths, quantities, and the affected row." maxlength="12000"></textarea></label>
         <details class="carryover"><summary>Carryover / next shift <span class="muted small">optional</span></summary><label><span class="sr-only">Carryover / next shift</span><textarea id="carryover" rows="3" placeholder="Where should the next shift pick up?" maxlength="12000"></textarea></label></details>
       </section>
-      <div class="review-row"><p class="muted small">Ready to wrap up?</p><button id="review-report" class="button primary">Review report</button></div>
-    </section>
-
-    <section id="report-panel" aria-label="Report" hidden>
-      <div class="section-heading"><div><h2>Review &amp; share your EOD</h2><p class="muted small">Your logged updates, ready for your supervisor.</p></div></div>
+      </details>
       <div id="report-checks" class="notice" hidden><div id="report-warnings"></div><button id="review-details" class="text-button">Review missing details</button></div>
       <section class="pdf-share-card" aria-label="Share your PDF report">
         <div class="pdf-file"><span class="pdf-icon" aria-hidden="true">PDF</span><div><strong id="pdf-filename"></strong><p id="pdf-summary" class="small muted"></p></div><span id="pdf-readiness" class="status"></span></div>
@@ -114,7 +138,7 @@
         <details id="teams-shortcut" class="teams-shortcut"><summary>Set up a Teams shortcut <span class="optional">optional</span></summary><form id="teams-form"><label for="teams-target">Work email or Teams conversation link</label><input id="teams-target" maxlength="4000" autocomplete="off" placeholder="name@company.com or a link copied from Teams" aria-describedby="teams-help"><p id="teams-help" class="small muted">Save your usual destination once. Open Teams takes you there; attach the PDF or paste your report and send it yourself.</p><div class="copy-actions"><button type="submit" class="button secondary">Save shortcut</button><button id="clear-teams" type="button" class="text-button">Clear shortcut</button></div><p id="teams-error" class="small danger-text" role="alert" hidden></p><p id="teams-status" class="small muted" role="status"></p></form></details>
         <p id="share-status" class="notice" role="status" hidden></p>
       </section>
-      <details class="sharing-options"><summary>Report options &amp; text copy</summary><label class="report-option"><input id="report-detail" type="checkbox">Include full ticket descriptions and detail columns</label><div class="copy-actions"><button id="copy-plain" class="button secondary">Copy readable text</button><button id="copy-table" class="button secondary">Copy table</button><button id="select-report" class="button secondary">Select report</button><button id="copy-rich" class="button secondary">Copy with links</button></div><p class="small muted">Copy with links includes clickable labels and a plain-text fallback with full URLs. Review your paste before sending: Teams can change formatting, especially on iPhone. PDF keeps the layout and clickable links.</p></details>
+      <details class="sharing-options"><summary>Report options &amp; text copy</summary><label class="report-option"><input id="report-detail" type="checkbox">Include full ticket descriptions and detail columns</label><div class="copy-actions"><button id="export-work-csv" class="button secondary" type="button">Export work CSV</button><button id="copy-plain" class="button secondary">Copy readable text</button><button id="copy-table" class="button secondary">Copy table</button><button id="select-report" class="button secondary">Select report</button><button id="copy-rich" class="button secondary">Copy with links</button></div><p class="small muted">Copy with links includes clickable labels and a plain-text fallback with full URLs. Review your paste before sending: Teams can change formatting, especially on iPhone. PDF keeps the layout and clickable links.</p></details>
       <div class="preview-heading"><h3>Report preview</h3><button class="text-button" data-tab="today">Edit log</button></div>
       <div id="report-preview" class="report-paper" tabindex="0" aria-label="Formatted report"></div>
       <div id="manual-copy" class="notice" hidden><label>Copy this report<textarea id="manual-text" rows="10" readonly></textarea></label><p class="small">Automatic copying isn’t available here. Select and copy the text above.</p></div>
@@ -129,8 +153,13 @@
     <noscript><p class="notice danger">JavaScript is needed to save work and create reports. Open this website in Safari or another browser with JavaScript enabled.</p></noscript>
   </main>
 
-  <nav class="bottom-nav" aria-label="Main navigation"><button data-tab="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 11h16m-11 4h2m3 0h2"/></svg><span>Today</span></button><button data-tab="report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H5V3h2zm7 0v6h5M8 13h8m-8 4h6"/></svg><span>Report</span></button><button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6m2-3v5l3 2"/></svg><span>History</span></button></nav>
+  <nav class="bottom-nav" aria-label="Main navigation"><button data-tab="today" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 11h16m-11 4h2m3 0h2"/></svg><span>Work</span></button><button data-tab="shift"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Shift &amp; crew</span></button><button data-tab="report"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H5V3h2zm7 0v6h5M8 13h8m-8 4h6"/></svg><span>Report</span></button><button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6m2-3v5l3 2"/></svg><span>History</span></button></nav>
+  <datalist id="category-options"></datalist>
   <div id="toast" role="status" class="toast" hidden></div>
+
+
+  <dialog id="member-dialog" aria-labelledby="member-dialog-title"><form id="member-form"><header class="dialog-header"><h2 id="member-dialog-title">Add crew member</h2><button id="close-member" class="icon-button" type="button" aria-label="Close member editor">×</button></header><div class="dialog-body"><div class="fields two"><label class="full">Member name<input id="member-name" maxlength="160" required autocomplete="off"></label><label>Work email <span class="optional">optional</span><input id="member-email" type="email" maxlength="254" placeholder="name@company.com"></label><label>Team / shift group <span class="optional">optional</span><input id="member-team" maxlength="80" placeholder="Night crew"></label></div><label id="member-use-label" class="check-label member-use"><input id="member-use" type="checkbox" checked>Also use on this shift</label><p id="member-error" class="small danger-text" role="alert"></p><button class="button primary" type="submit">Save member</button></div></form></dialog>
+  <dialog id="crew-import-dialog" aria-labelledby="crew-import-title"><header class="dialog-header"><h2 id="crew-import-title">Import crew</h2><button id="close-crew-import" class="icon-button" type="button" aria-label="Close crew import">×</button></header><div class="dialog-body"><p class="small muted">Use columns <strong>Name, Email, Team</strong>. Only Name is required. Paste cells from Excel or choose a CSV UTF-8 file.</p><div class="crew-import-source"><label>CSV file<input id="crew-import-file" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"></label><button id="crew-template" class="text-button" type="button">Download CSV template</button><label>Or paste your table<textarea id="crew-import-source" rows="4" maxlength="1000000" placeholder="Name&#9;Email&#9;Team&#10;Example Technician&#9;technician@example.com&#9;Night crew"></textarea></label><button id="crew-import-review" class="button secondary" type="button">Review import</button></div><p id="crew-import-error" class="small danger-text" role="alert"></p><section id="crew-import-preview" hidden><p class="small muted">Choose members to import. Matching emails (or names without an email) update the library; saved shift records stay intact.</p><div id="crew-import-list"></div><label class="check-label member-use"><input id="crew-import-use" type="checkbox">Also add selected members to this shift</label><button id="crew-import-save" class="button primary" type="button">Import members</button></section></div></dialog>
 
   <dialog id="task-dialog" aria-labelledby="dialog-title">
     <form id="task-form">
@@ -142,7 +171,7 @@
           <label class="full">Work title <span id="title-optional" class="optional">optional</span><input id="task-title" placeholder="Short summary of the work" maxlength="200"></label>
           <label id="kind-label">Field work type<select id="task-kind"></select></label><label>Status<select id="task-status"></select></label>
           <label id="custom-label" class="full" hidden>Custom task name<input id="task-custom" placeholder="Describe the type of work" maxlength="160"></label>
-          <label>Ticket number <span class="optional">optional</span><input id="task-ticket" placeholder="INC, REQ, or work order number" maxlength="160"></label><label>Category <span class="optional">optional</span><select id="task-category"></select></label>
+          <label>Ticket number <span class="optional">optional</span><input id="task-ticket" placeholder="INC, REQ, or work order number" maxlength="160"></label><label>Category <span class="optional">optional</span><input id="task-category" list="category-options" maxlength="80" placeholder="Choose or type a category"></label>
           <label class="full">Description / request <span class="optional">optional</span><textarea id="task-description" rows="3" placeholder="What does the ticket or task ask for?" maxlength="12000"></textarea></label>
           <label class="full">Work performed / progress <span class="optional">optional</span><textarea id="task-notes" rows="3" placeholder="What you did, the result, and what remains" maxlength="12000"></textarea></label>
         </div>

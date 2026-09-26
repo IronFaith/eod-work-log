@@ -1,5 +1,5 @@
-import { reportData } from './model.mjs?v=3.11';
-import { linkParts } from './links.mjs?v=3.11';
+import { reportData } from './model.mjs?v=4.0';
+import { linkParts } from './links.mjs?v=4.0';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
@@ -97,8 +97,10 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
   function section(title, options) {
     if (y > doc.internal.pageSize.getHeight() - 48) { doc.addPage(); y = 25; }
     doc.setFont('NotoSans', 'bold'); doc.setFontSize(12); doc.setTextColor(24, 58, 86);
-    doc.text(title, 16, y);
-    table({ ...base, startY: y + 4, ...options });
+    const titleLines = doc.splitTextToSize(title, 178);
+    if (y + titleLines.length * 5 > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); y = 25; }
+    doc.text(titleLines, 16, y);
+    table({ ...base, startY: y + (titleLines.length - 1) * 5 + 4, ...options });
     y = doc.lastAutoTable.finalY + 11;
   }
   const hasLocation = labels.length === 4;

@@ -1,13 +1,23 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=3.11';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=4.0';
+import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=4.0';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
 export const UNITS = ['bundles', 'fibers', 'cables', 'connections', 'items'];
 export const STATUSES = ['In progress', 'Completed', 'Blocked'];
 export const ENTRY_TYPES = ['field', 'ticket', 'general', 'quick'];
-export const QUICK_MODES = ['lines', 'single', 'blocks', 'table', 'tickets'];
+export const QUICK_MODES = ['lines', 'single', 'blocks', 'table', 'tickets', 'csv'];
 export const COUNT_FIELDS = { category: 'Category', area: 'Row / area', status: 'Status' };
 export const CATEGORIES = ['Pulling / installation', 'Dressing / bundling', 'Labeling / testing', 'Rework / troubleshooting', 'General / support'];
+export function categoryNames(names) {
+  const unique = new Map();
+  for (const value of names) { const name = categoryFrom(value); if (name && !unique.has(name.toLowerCase())) unique.set(name.toLowerCase(), name); }
+  return [...unique.values()];
+}
+export function filterTasks(tasks, { query = '', category = null } = {}) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return tasks.filter(task => (category === null || (task.category || '').toLowerCase() === category.toLowerCase()) && words.every(word => displayText([taskName(task), task.ticketId, taskDetails(task), task.area, task.category, task.status].join(' ')).toLowerCase().includes(word)));
+}
 export function suggestCategory(text) {
   text = displayText(text).replace(/\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi, '');
   const patterns = [/\b(pull(?:ing|ed)?|install(?:ing|ed|ation)?)\b/i, /\b(dress(?:ing|ed)?|bundl(?:ed|ing)|roll(?:ing|ed)?)\b|\bbundle\s+(?:cables?|fibers?)\b/i, /\b(label(?:s|ing|ed)?|test(?:s|ing|ed)?)\b/i, /\b(rework|troubleshoot(?:ing)?|repair(?:ing|ed)?)\b/i, /\b(housekeeping|cleanup|cleaning|support)\b/i];
@@ -26,7 +36,11 @@ export function groupTasks(tasks, view = 'category') {
   return [...groups.values()].sort((a, b) => {
     if (!a.label) return 1;
     if (!b.label) return -1;
-    return view === 'category' ? CATEGORIES.indexOf(a.label) - CATEGORIES.indexOf(b.label) : a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
+    if (view === 'category') {
+      const order = label => { const index = CATEGORIES.findIndex(name => name.toLowerCase() === label.toLowerCase()); return index < 0 ? CATEGORIES.length : index; };
+      if (order(a.label) !== order(b.label)) return order(a.label) - order(b.label);
+    }
+    return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
   }).map(group => ({ ...group, label: group.label || (view === 'area' ? 'No row / area' : 'Uncategorized') }));
 }
 export function replaceTasks(day, tasks, label) {
@@ -59,6 +73,32 @@ export function carryTasks(source, target, ids) {
 }
 const HEADER_KEYS = ['location', 'supervisor', 'lead', 'crew', 'start', 'end'];
 export const blankHeader = () => Object.fromEntries(HEADER_KEYS.map(key => [key, '']));
+export function shiftEnd(start, hours) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || ![8, 10, 12].includes(Number(hours))) throw new Error('Choose a start time and an 8, 10, or 12-hour shift.');
+  const [h, m] = start.split(':').map(Number), total = h * 60 + m + Number(hours) * 60;
+  return { end: `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`, overnight: total >= 1440 };
+}
+function durationFrom(value) {
+  if (value == null || value === '') return '';
+  if (!['8', '10', '12'].includes(String(value))) throw new Error('Choose a valid shift duration.');
+  return String(value);
+}
+export function shiftPreset(value) {
+  if (!isObject(value)) throw new Error('Invalid shift preset.');
+  const name = textField(value.name, 80).trim(), header = headerFrom(value.header), duration = durationFrom(value.duration);
+  if (!name || !header.start || !header.end) throw new Error('Name the preset and enter its start and end times.');
+  if (duration) header.end = shiftEnd(header.start, duration).end;
+  return { id: textField(value.id, 100) || crypto.randomUUID(), name, duration, header, crewMembers: membersFrom(value.crewMembers, 200) };
+}
+export function shiftLabel(header) {
+  let label = `${clockLabel(header.start)}–${clockLabel(header.end)}`;
+  if (!header.start || !header.end) return label;
+  const minutes = time => { const [h, m] = time.split(':').map(Number); return h * 60 + m; };
+  const elapsed = (minutes(header.end) - minutes(header.start) + 1440) % 1440;
+  if (header.end < header.start) label += ' (next day)';
+  if (elapsed) label += ` · ${Number((elapsed / 60).toFixed(2))} hours`;
+  return label;
+}
 export function localDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -67,11 +107,11 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 8, defaults: blankHeader(), pastePreferences: null, teamsTarget: '', days: {} }; }
+export function newState() { return { schema: 9, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], pastePreferences: null, teamsTarget: '', days: {} }; }
 export function ensureDay(state, date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!Object.hasOwn(state.days, date)) state.days[date] = {
-    date, header: { ...state.defaults }, tasks: [], undo: null, countBy: 'category', showCounts: true, updateCategoryDraft: 'auto', updateAreaDraft: '', updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
+    date, header: { ...state.defaults }, shiftDuration: state.defaultShiftDuration || '', crewMembers: structuredClone(state.defaultCrewMembers || []), tasks: [], undo: null, countBy: 'category', showCounts: true, updateCategoryDraft: 'auto', updateCategoryAuto: true, updateAreaDraft: '', updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
   };
   return state.days[date];
 }
@@ -112,9 +152,26 @@ function pastedTable(source) {
   row.push(cell.trim()); rows.push(row);
   return rows.filter(values => values.some(Boolean));
 }
+export function workCsv(tasks) {
+  return writeTable([['Title', 'Description', 'Category', 'Area'], ...tasks.map(task => [[taskName(task), task.ticketId ? `Ticket ${task.ticketId}` : ''].filter(Boolean).join(' · '), [taskDetails(task), task.status ? `Status: ${task.status}` : ''].filter(Boolean).join('\n'), task.category, task.area])]);
+}
+function workCsvRows(source) {
+  const rows = readTable(source), headers = rows.shift() || [], names = headers.map(name => name.trim().toLowerCase());
+  const index = { title: names.findIndex(name => ['title', 'ticket', 'work', 'task'].includes(name)), summary: names.findIndex(name => ['description', 'progress', 'summary'].includes(name)), category: names.indexOf('category'), area: names.findIndex(name => ['area', 'row', 'row / area'].includes(name)) };
+  if (index.title < 0) throw new Error('Work CSV needs a Title column. Description, Category, and Area are optional.');
+  return rows.map((row, number) => {
+    if (row.length > headers.length) throw new Error(`CSV row ${number + 2} has extra cells. Check its commas and quotes.`);
+    const get = key => index[key] < 0 ? '' : row[index[key]] || '';
+    const title = textField(get('title'), 200).trim();
+    if (!title) throw new Error(`Add a title to CSV row ${number + 2}.`);
+    const extras = row.map((value, col) => value && !Object.values(index).includes(col) ? `${headers[col]}: ${value}` : '').filter(Boolean);
+    return { title, summary: textField([get('summary'), ...extras].filter(Boolean).join('\n')), category: categoryFrom(get('category')), area: textField(get('area'), 200) };
+  });
+}
 export function splitQuickNotes(source, { mode = 'lines', headers = false } = {}) {
   const text = textField(source).replace(/\r\n|\r/g, '\n');
   if (!QUICK_MODES.includes(mode)) throw new Error('Choose how to separate your pasted updates.');
+  if (mode === 'csv') return workCsvRows(text).map(row => [row.title, row.summary].filter(Boolean).join('\n'));
   if (mode === 'tickets') return text.split('\n').filter(line => line.trim()).flatMap(line => {
     const isId = id => /^(?:(?:TK|INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)-?\d+|[A-Z][A-Z0-9]{1,11}-\d+)$/i.test(id) && !/^(ROW|RACK|ROOM)-/i.test(id);
     const onlyIds = line.trim().split(/[\s,;]+/).filter(Boolean);
@@ -166,12 +223,14 @@ export function createPasteReview(tasks, source, { mode = 'lines', headers = fal
   const summaries = splitQuickNotes(source, { mode, headers });
   if (summaries.length > 1000) throw new Error('Review up to 1,000 updates at a time.');
   const seen = new Set(), existing = new Set(tasks.map(task => (task.entryType === 'quick' ? [task.title, task.summary].filter(Boolean).join('\n') : taskSummary(task)).trim()));
-  const rows = summaries.map(text => {
+  const csvRows = mode === 'csv' ? workCsvRows(source) : null;
+  const rows = summaries.map((text, index) => {
     const [first, ...rest] = text.split('\n');
     const row = { title: first.length <= 200 ? first : '', summary: first.length <= 200 ? rest.join('\n').trim() : text, action: 'add', targetId: '' };
     const matches = ticketMatches(tasks, row);
     row.category = matches.length === 1 ? matches[0].category || '' : suggestCategory(text);
     row.area = matches.length === 1 ? matches[0].area : '';
+    if (csvRows) Object.assign(row, csvRows[index]);
     const key = ticketKey(row) || text;
     if (existing.has(text) || seen.has(key)) row.action = 'skip';
     else if (matches.length) row.action = '';
@@ -209,7 +268,7 @@ export function reportWarnings(day) {
   if (!day.header.start || !day.header.end) warnings.push('Add shift start and end times.');
   if (!day.header.location.trim()) warnings.push('Add the work location.');
   if (!day.header.supervisor.trim()) warnings.push('Add the supervisor.');
-  if (!day.header.crew.trim()) warnings.push('Add your crew.');
+  if (!crewText(day).trim()) warnings.push('Add your crew.');
   if (!day.tasks.length) warnings.push('Add at least one task.');
   if (day.updateTitleDraft?.trim() || day.updateDescriptionDraft?.trim()) warnings.push('Add your draft update to the log before sharing.');
   if (day.quickDraft?.trim() || day.pasteReview?.rows.length) warnings.push('Add your quick notes to the log before sharing.');
@@ -225,7 +284,7 @@ function clockLabel(value) {
 export function reportData(day, { detailed = false } = {}) {
   const dateLabel = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const heading = `${reportWarnings(day).length ? 'Draft EOD' : 'EOD'} — ${dateLabel}`;
-  const header = [['Shift', `${clockLabel(day.header.start)}–${clockLabel(day.header.end)}`], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ...(day.header.lead.trim() ? [['Acting lead', day.header.lead.trim()]] : []), ['Crew', day.header.crew || 'Not recorded']];
+  const header = [['Shift', shiftLabel(day.header)], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ...(day.header.lead.trim() ? [['Acting lead', day.header.lead.trim()]] : []), ['Crew', crewText(day) || 'Not recorded']];
   const production = productionData(day.tasks, { detailed });
   const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
   const counts = day.showCounts !== false && day.tasks.length ? workCounts(day.tasks, day.countBy) : null;
@@ -289,8 +348,8 @@ function positive(value, whole = false) {
 }
 function categoryFrom(value) {
   if (value == null || value === '') return '';
-  if (!CATEGORIES.includes(value)) throw new Error('Choose a valid category.');
-  return value;
+  if (typeof value !== 'string' || value.length > 80 || /[\r\n\t\x00-\x1f]/.test(value)) throw new Error('Use a category name of up to 80 characters on one line.');
+  return value.trim().replace(/ +/g, ' ');
 }
 function undoFrom(value) {
   if (value == null) return null;
@@ -324,9 +383,17 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
+  state.defaultShiftDuration = durationFrom(raw.defaultShiftDuration);
+  state.members = membersFrom(raw.members);
+  state.defaultCrewMembers = membersFrom(raw.defaultCrewMembers, 200);
+  if (raw.categories != null && (!Array.isArray(raw.categories) || raw.categories.length > 5000)) throw new Error('Invalid saved categories.');
+  state.categories = categoryNames(raw.categories || []);
+  if (raw.shiftPresets != null && (!Array.isArray(raw.shiftPresets) || raw.shiftPresets.length > 50)) throw new Error('Use up to 50 saved shift presets.');
+  state.shiftPresets = (raw.shiftPresets || []).map(shiftPreset);
+  if (new Set(state.shiftPresets.map(preset => preset.id)).size !== state.shiftPresets.length) throw new Error('Duplicate shift preset IDs.');
   state.teamsTarget = textField(raw.teamsTarget, 4000);
   teamsDestination(state.teamsTarget);
   if (raw.pastePreferences != null) {
@@ -338,18 +405,22 @@ export function parseBackup(source) {
     const tasks = value.tasks.map(validateTask);
     if (new Set(tasks.map(task => task.id)).size !== tasks.length) throw new Error('This backup contains duplicate task IDs.');
     state.days[date] = { date, header: headerFrom(value.header), tasks, updateTitleDraft: textField(value.updateTitleDraft, 200), updateDescriptionDraft: textField(value.updateDescriptionDraft), quickDraft: textField(value.quickDraft), pasteReview: reviewFrom(value.pasteReview), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
-    Object.assign(state.days[date], { countBy: Object.hasOwn(COUNT_FIELDS, value.countBy) ? value.countBy : 'category', showCounts: value.showCounts !== false, undo: undoFrom(value.undo), updateCategoryDraft: value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' ? 'auto' : categoryFrom(value.updateCategoryDraft), updateAreaDraft: textField(value.updateAreaDraft, 200) });
+    Object.assign(state.days[date], { shiftDuration: durationFrom(value.shiftDuration), updateCategoryAuto: value.updateCategoryAuto == null ? value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' : value.updateCategoryAuto === true, crewMembers: membersFrom(value.crewMembers, 200), countBy: Object.hasOwn(COUNT_FIELDS, value.countBy) ? value.countBy : 'category', showCounts: value.showCounts !== false, undo: undoFrom(value.undo), updateCategoryDraft: value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' ? 'auto' : categoryFrom(value.updateCategoryDraft), updateAreaDraft: textField(value.updateAreaDraft, 200) });
   }
   return state;
 }
 export const exportBackup = state => JSON.stringify(state, null, 2);
 export function hasDayContent(day, defaults) {
-  return Boolean(day.updatedAt || day.tasks.length || day.updateTitleDraft || day.updateDescriptionDraft || day.quickDraft || day.pasteReview?.rows.length || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
+  return Boolean(day.updatedAt || day.tasks.length || day.crewMembers?.length || day.shiftDuration || day.updateTitleDraft || day.updateDescriptionDraft || day.quickDraft || day.pasteReview?.rows.length || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
 }
 export function mergeBackup(current, incoming) {
   const days = { ...incoming.days };
   for (const [date, day] of Object.entries(current.days)) {
     if (!Object.hasOwn(days, date) || hasDayContent(day, current.defaults)) days[date] = day;
   }
-  return { schema: 8, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
+  const presets = new Map();
+  for (const preset of [...(current.shiftPresets || []), ...(incoming.shiftPresets || [])]) if (!presets.has(preset.name.toLowerCase()) && ![...presets.values()].some(item => item.id === preset.id)) presets.set(preset.name.toLowerCase(), preset);
+  if (presets.size > 50) throw new Error('The combined backup has more than 50 shift presets.');
+  const currentDefaults = Object.values(current.defaults).some(Boolean);
+  return { schema: 9, defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
 }
