@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.10">
+  <link rel="stylesheet" href="styles.css?v=3.11">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.10"></script>
+  <script type="module" src="app.mjs?v=3.11"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -46,22 +46,16 @@
 
       <div class="work-preview-layout">
       <section class="work-section" aria-labelledby="tasks-title">
-        <div class="section-heading"><div><h2 id="tasks-title">Log your work</h2><p class="muted small">Paste from your tickets or add a short update. Everything goes into the same daily log.</p><p class="muted small formatting-help">Bold and links format as you type. Incomplete markup stays visible. Click formatted text or use Show markup to edit it.</p></div></div>
-        <div class="entry-workspace">
-        <form id="quick-form" class="quick-composer paste-composer" aria-labelledby="paste-heading">
-          <h3 id="paste-heading">Paste tasks &amp; updates</h3>
-          <p class="small muted composer-intro">Copy the notes or cells you already have. Paste, choose how to group them, then review.</p>
+        <div class="section-heading"><div><h2 id="tasks-title">Log your work</h2><p class="muted small">A title and a short result are enough. Paste a list when you have several tickets.</p></div></div>
+        <div class="unified-composer">
+        <div class="composer-switch" role="group" aria-label="Add work"><button type="button" data-composer="single" aria-pressed="true">Write an update<span id="single-draft-badge" hidden>Draft</span></button><button type="button" data-composer="paste" aria-pressed="false">Paste a list<span id="paste-draft-badge" hidden>Draft</span></button></div>
+        <p id="paste-stale" class="notice" hidden>Your paste or grouping changed. Refresh review replaces your earlier review edits.</p>
+        <form id="quick-form" class="quick-composer paste-composer" aria-label="Paste a list" hidden>
           <label for="quick-notes">Paste your updates</label>
-          <textarea id="quick-notes" rows="6" maxlength="12000" placeholder="INC-204 — restored link; complete&#10;Row A — pulled 4 bundles; 2 remaining" aria-describedby="quick-help"></textarea>
+          <textarea id="quick-notes" rows="4" maxlength="12000" placeholder="tk28493 tk83939 tk939393&#10;or paste the task notes you already have" aria-describedby="quick-help"></textarea>
           <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
           <div class="paste-setup">
-            <fieldset id="quick-mode" class="paste-modes"><legend>How should this paste be grouped?</legend>
-              <label><input type="radio" name="quick-mode" value="lines" checked><span>One update per line</span></label>
-              <label><input type="radio" name="quick-mode" value="tickets"><span>Ticket IDs (spaces / commas)</span></label>
-              <label><input type="radio" name="quick-mode" value="single"><span>One whole ticket / note</span></label>
-              <label><input type="radio" name="quick-mode" value="blocks"><span>Separate by blank lines</span></label>
-              <label><input type="radio" name="quick-mode" value="table"><span>Spreadsheet rows (tabs)</span></label>
-            </fieldset>
+            <label>Separate into<select id="quick-mode"><option value="lines">One update per line</option><option value="tickets">Ticket IDs (spaces / commas)</option><option value="single">One whole ticket / note</option><option value="blocks">Separate by blank lines</option><option value="table">Spreadsheet rows (tabs)</option></select></label>
             <label id="table-header-option" class="report-option" hidden><input id="quick-table-headers" type="checkbox" checked>First row contains column names</label>
           </div>
           <p id="quick-help" class="small muted">Paste with Ctrl+V or Cmd+V. Each line becomes an update.</p>
@@ -69,31 +63,25 @@
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter to continue.</p><button id="save-quick" class="button primary" type="submit" disabled>Add to log</button></div>
           <p id="quick-error" class="small danger-text" role="alert" hidden></p>
         </form>
-        <div class="entry-side">
         <section id="paste-review" class="quick-composer" aria-labelledby="paste-title" hidden>
-          <h3 id="paste-title">Review pasted updates</h3>
-          <p class="small muted composer-intro">The first line is suggested as the title. Edit the result below, then add or update your log.</p>
-          <p id="paste-stale" class="notice" hidden>Your paste or grouping changed. Use Refresh review to replace these suggestions with the new paste. This also replaces your review edits.</p>
+          <div class="review-heading"><h3 id="paste-title">Review your updates</h3><button id="cancel-paste" type="button" class="text-button">Edit paste</button></div>
           <form id="paste-form">
-            <div class="batch-fill"><h4>Fill the batch once <span class="optional">optional</span></h4><p class="small muted">Fills blank fields on non-skipped updates. Individual descriptions and categories stay as entered.</p><label>Shared description<textarea id="paste-shared-description" data-linkable rows="2" maxlength="12000" placeholder="Checked links; all stable."></textarea></label><div class="fields two organize-fields"><label>Shared category<select id="paste-shared-category"></select></label><label>Shared row / area<input id="paste-shared-area" maxlength="200" placeholder="Row A"></label></div><button id="fill-paste" type="button" class="button secondary">Fill empty fields</button><p id="paste-fill-status" class="small muted" role="status"></p></div>
-            <div id="paste-list"></div><div id="paste-preview-slot" class="preview-slot"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><button id="cancel-paste" type="button" class="text-button">Keep draft &amp; close</button><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
+            <details id="batch-fill" class="batch-fill"><summary>Shared details for this list <span class="optional">optional</span></summary><p class="small muted">Fill blank descriptions, categories, or areas once. Individual edits stay as entered.</p><label>Shared description<textarea id="paste-shared-description" data-linkable rows="2" maxlength="12000" placeholder="Checked links; all stable."></textarea></label><div class="fields two organize-fields"><label>Shared category<select id="paste-shared-category"></select></label><label>Shared row / area<input id="paste-shared-area" maxlength="200" placeholder="Row A"></label></div><button id="fill-paste" type="button" class="button secondary">Fill empty fields</button><p id="paste-fill-status" class="small muted" role="status"></p></details>
+            <div id="paste-list"></div><div id="paste-preview-slot" class="preview-slot"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><p class="small muted">Ctrl/Cmd+Enter to save.</p><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
         </section>
-        <form id="update-form" class="quick-composer single-composer" aria-labelledby="single-heading">
-          <h3 id="single-heading">Add one update</h3>
-          <p class="small muted composer-intro">A title is enough. Add a description only when it helps.</p>
+        <form id="update-form" class="quick-composer single-composer" aria-label="Write an update">
           <label for="update-title">Title / ticket</label>
           <input id="update-title" maxlength="200" placeholder="INC-204 — Restore rack connection" aria-describedby="update-title-help" required>
-          <p id="update-title-help" class="small muted field-help">Use a ticket title or a task like “Pull fiber — Row A”.</p>
+          <p id="update-title-help" class="sr-only">Use a ticket title or a task like Pull fiber — Row A.</p>
           <label for="update-description">Description <span class="optional">optional</span></label>
           <textarea id="update-description" rows="3" maxlength="12000" placeholder="Replaced the patch cable; link stable." aria-describedby="update-description-help"></textarea>
-          <p id="update-description-help" class="small muted field-help">Add the result, quantity, blocker, or next step if useful. No need to repeat the full ticket.</p>
+          <p id="update-description-help" class="sr-only">Add the result, quantity, blocker, or next step if useful.</p>
           <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>
           <div class="fields two organize-fields"><label>Category <span class="optional">optional</span><select id="update-category"></select></label><label>Row / area <span class="optional">optional</span><input id="update-area" maxlength="200" placeholder="Row A, Rack 12…"></label></div>
           <div id="single-preview-slot" class="preview-slot"></div>
           <div class="quick-footer"><p class="small muted">Ctrl+Enter or Cmd+Enter adds your update.</p><button id="save-update" class="button primary" type="submit" disabled>Add update</button></div>
           <p id="update-error" class="small danger-text" role="alert" hidden></p>
         </form>
-        </div>
         </div>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
         <div class="log-toolbar"><div><h3>Your daily log</h3><p id="task-count" class="muted small"></p></div><div class="log-tools"><button id="bring-forward" class="button secondary" type="button" aria-expanded="false" aria-controls="carry-panel">Bring work forward</button><button id="undo-log" class="button secondary" type="button" disabled>Undo last log change</button></div></div>

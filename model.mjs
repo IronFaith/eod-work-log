@@ -1,4 +1,4 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=3.10';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=3.11';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];

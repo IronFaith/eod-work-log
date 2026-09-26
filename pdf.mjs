@@ -1,5 +1,5 @@
-import { reportData } from './model.mjs?v=3.10';
-import { linkParts } from './links.mjs?v=3.10';
+import { reportData } from './model.mjs?v=3.11';
+import { linkParts } from './links.mjs?v=3.11';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
