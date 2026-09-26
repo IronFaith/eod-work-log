@@ -1,5 +1,5 @@
-import { reportData } from './model.mjs?v=3.9';
-import { linkParts } from './links.mjs?v=3.9';
+import { reportData } from './model.mjs?v=3.10';
+import { linkParts } from './links.mjs?v=3.10';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
@@ -79,7 +79,7 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
     doc.addFileToVFS(`NotoSans-${style}.ttf`, fonts[style]);
     doc.addFont(`NotoSans-${style}.ttf`, 'NotoSans', style === 'regular' ? 'normal' : 'bold');
   }
-  const { heading, header, labels, taskGroups, blockers, carryover } = reportData(day, options);
+  const { heading, header, labels, taskGroups, counts, blockers, carryover } = reportData(day, options);
   doc.setProperties({ title: heading, subject: 'Daily work report', creator: 'EOD Work Log' });
   doc.setFont('NotoSans', 'bold');
   doc.setTextColor(24, 58, 86);
@@ -102,7 +102,8 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
     y = doc.lastAutoTable.finalY + 11;
   }
   const hasLocation = labels.length === 4;
-  for (const group of taskGroups) section(group.label, {
+  if (counts) section('Work counts', { head: [counts.labels], body: [...counts.rows, ['Total logged entries', String(counts.entries)], ['Unique ticket IDs', String(counts.tickets)], ['Distinct rows / areas', String(counts.areas)]], columnStyles: { 1: { cellWidth: 32 } } });
+  for (const group of taskGroups) section(`${group.label} · ${group.tasks.length} ${group.tasks.length === 1 ? 'entry' : 'entries'}`, {
     head: [labels], body: group.rows,
     columnStyles: options.detailed ? (hasLocation ? { 0: { cellWidth: 39 }, 1: { cellWidth: 27 }, 3: { cellWidth: 25 } } : { 0: { cellWidth: 48 }, 2: { cellWidth: 25 } }) : (labels.length === 2 ? { 1: { cellWidth: 27 } } : {})
   });

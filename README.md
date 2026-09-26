@@ -10,16 +10,17 @@ The public repository contains only the app and synthetic test fixtures. It does
 
 ## Paste from your computer
 
-Paste into **Paste your updates** with Ctrl+V (Windows) or Cmd+V (Mac). The paste box and all four grouping options are always visible. Choose the grouping that fits:
+Paste into **Paste your updates** with Ctrl+V (Windows) or Cmd+V (Mac). The paste box and all five grouping options are always visible. Choose the grouping that fits:
 
 - **One update per line:** for short production lists. Each line becomes a suggested title in the review.
+- **Ticket IDs (spaces / commas):** `tk28493 tk83939 tk939393` becomes three entries with optional descriptions. Commas, semicolons, and new lines also work. For existing descriptions, put each on a separate line as `tk28493 | Checked link` (a tab or spaced dash also works). Unexpected text is left in the paste box with an error instead of being discarded. **Fill the batch once** applies a shared description, category, or row/area only to blank fields in non-skipped updates. Review fields and unapplied shared values are saved as drafts.
 - **One whole ticket / note:** keeps a multiline ticket together. Trim the original request down to the reference and result during review.
 - **Separate by blank lines:** keeps each ticket or note block together.
 - **Spreadsheet rows (tabs):** for cells copied from Excel or another tab-separated table. Set **First row contains column names** to match what you copied. Quoted multiline cells are preserved. Unquoted line breaks are separate rows.
 
 Use Ctrl+Enter or Cmd+Enter in the paste box to review on the same screen. The first line is suggested as the title and remaining lines as the description. If the first line is too long for a title, all text stays in the description for you to name. Edit each entry and choose how to save it, then **Save N updates**. **Keep draft & close** retains edits; reopening or reloading restores them. Changing the source or grouping requires **Refresh review**, which replaces review edits with fresh suggestions. **Finish without adding** clears an all-skipped review. Your last grouping and column-header preference carry into new days; saved days retain their own settings.
 
-Ticket matching looks only at today's log, using an explicit ticket field or a single reference in the title/first line. It recognizes common prefixed IDs such as INC204, REQ-204, WO-42, and ABC-123; case and separator differences are ignored, while digits (including leading zeros) remain exact. Multiple references and row/rack labels are not used to choose a match. References buried only in descriptions are not matched. Matching never updates automatically: select an existing entry or **Add separate work**. Updating replaces the title and progress, preserving the original request, quantities, status, and other detailed fields. Only one update per existing entry is allowed in each batch. The app groups text locally; it does not summarize descriptions or infer completion.
+Ticket matching looks only at today's log, using an explicit ticket field or a single reference in the title/first line. It recognizes common prefixed IDs such as TK28493, INC204, REQ-204, WO-42, and ABC-123; case and separator differences are ignored, while digits (including leading zeros) remain exact. Multiple references and row/rack labels are not used to choose a match. References buried only in descriptions are not matched. Matching never updates automatically: select an existing entry or **Add separate work**. Updating replaces the title and progress, preserving the original request, quantities, status, and other detailed fields. Only one update per existing entry is allowed in each batch. The app groups text locally; it does not summarize descriptions or infer completion.
 
 To write one update yourself, use **Title / ticket** in the adjacent **Add one update** form. Add a description if useful. Both forms add to the same daily log; you only need to use one for each piece of work.
 
@@ -33,7 +34,7 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy with links** writes both HTML with clickable labels and plain text with full URLs through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks and link destinations. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 3.9 reads existing schema 1–7 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 7 to retain the optional Teams shortcut as well as categories, carry-forward references, and Undo. Older app versions cannot read schema 7 backups.
+Version 3.10 reads existing schema 1–8 records and backups automatically, keeping the same storage key and website address. Reload the app to update; do not clear website data. New exports use schema 8 to retain counts preferences and shared batch drafts alongside existing fields. Older app versions cannot read schema 8 backups.
 
 ## Format text while entering it
 
@@ -103,3 +104,7 @@ PDF generation runs on the device using bundled jsPDF 4.2.1, AutoTable 5.0.8, an
 Publish the repository root through GitHub Pages. Files are plain HTML, CSS, and JavaScript modules. `.nojekyll` disables Jekyll processing.
 
 This implementation was reconstructed from the EOD workflow requirements because the original generated download was unavailable. Actual iPhone-to-Teams formatting must be checked on the user's device; a desktop browser check is not equivalent.
+
+## Work counts
+
+The daily log shows saved entries, unique recognized ticket IDs, and distinct row/area labels (case-insensitive). Choose **Count entries by** category, row/area, or status. Blank fields remain visible as Uncategorized, No row / area, or No status, so group counts add up to the entry total. Repeated work on the same ticket counts as separate entries but one unique ticket. IDs in descriptions are not counted. Quantities are not added together or treated as completed production. The live preview shows projected totals; the daily counters change only on save. **Include counts in report & PDF** controls the summary table and is saved per day with the grouping choice.

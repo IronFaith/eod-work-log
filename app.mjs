@@ -1,9 +1,9 @@
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.9';
-import { buildReportPdf } from './pdf.mjs?v=3.9';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables } from './model.mjs?v=3.9';
-import { previewDraft } from './preview.mjs?v=3.9';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=3.9';
-import { refreshFormatting, sourceField } from './editor.mjs?v=3.9';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=3.10';
+import { buildReportPdf } from './pdf.mjs?v=3.10';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables, fillPasteReview, workCounts } from './model.mjs?v=3.10';
+import { previewDraft } from './preview.mjs?v=3.10';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=3.10';
+import { refreshFormatting, sourceField } from './editor.mjs?v=3.10';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -61,6 +61,7 @@ function renderHeader() {
 }
 function fillDay() {
   renderTeamsShortcut();
+  $('paste-shared-description').value = ''; $('paste-shared-category').value = ''; $('paste-shared-area').value = ''; $('paste-fill-status').textContent = '';
   for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).value = day().header[key];
   document.querySelectorAll('[name="blocker-state"]').forEach(input => { input.checked = input.value === day().blockerState; });
   $('blockers').value = day().blockers;
@@ -81,6 +82,7 @@ function fillDay() {
 }
 function renderTasks() {
   const tasks = day().tasks;
+  renderCounts();
   $('task-count').textContent = tasks.length ? `${tasks.length} ${tasks.length === 1 ? 'entry' : 'entries'} in your report` : 'Your updates will appear here.';
   $('task-list').innerHTML = groupTasks(tasks, $('log-view').value).map(group => `${group.label ? `<h3 class="log-group">${esc(group.label)} <span class="small muted">${group.tasks.length}</span></h3>` : ''}${group.tasks.map(task => {
     const number = tasks.indexOf(task) + 1, draft = inlineEdits.get(editKey(task.id));
@@ -96,6 +98,13 @@ function renderTasks() {
   if (!$('carry-panel').hidden) renderCarryList();
   renderPasteReview();
   renderLivePreview();
+}
+function renderCounts() {
+  const counts = workCounts(day().tasks, day().countBy);
+  $('count-by').value = day().countBy;
+  $('show-counts').checked = day().showCounts;
+  $('counts-total').textContent = counts.summary;
+  $('counts-breakdown').innerHTML = counts.rows.length ? `<table><thead><tr><th>${esc(counts.labels[0])}</th><th>Entries</th></tr></thead><tbody>${counts.rows.map(([label, count]) => `<tr><td>${esc(label)}</td><td>${count}</td></tr>`).join('')}</tbody></table>` : '<p class="small muted">Save an update to start counting.</p>';
 }
 function currentSingleTask() {
   const title = $('update-title').value.trim(), summary = $('update-description').value.trim();
@@ -142,6 +151,7 @@ function renderLivePreview() {
       notice = [result.pending ? `${result.pending} matching ${result.pending === 1 ? 'ticket needs' : 'tickets need'} a Save as choice in Review before appearing here.` : '', result.skipped ? `${result.skipped} skipped ${result.skipped === 1 ? 'update is' : 'updates are'} excluded.` : ''].filter(Boolean).join(' ');
     }
     context += ` · ${result.tasks.length} ${result.tasks.length === 1 ? 'entry' : 'entries'}`;
+    if (result.tasks.length) context += `\n${kind === 'log' ? 'Saved totals' : 'Totals after saving included updates'}: ${workCounts(result.allTasks).summary}.`;
     $('live-preview-table').innerHTML = result.tasks.length ? renderProductionTables(result.tasks, { detailed, columnTasks: result.allTasks }) : '<p class="preview-empty">Type a title, fill in field work, or paste updates to see the report table here.</p>';
     if (['paste', 'review'].includes(kind) && !result.tasks.length && (result.pending || result.skipped)) $('live-preview-table').innerHTML = '<p class="preview-empty">No included updates to preview yet.</p>';
   } catch (error) {
@@ -207,6 +217,7 @@ function updateQuickButton() {
   $('table-header-option').hidden = mode !== 'table';
   const tips = {
     lines: 'Paste with Ctrl+V or Cmd+V. Each line becomes an update.',
+    tickets: 'Paste tk28493 tk83939 tk939393 — each ID gets its own entry. Spaces, commas, and new lines work. To include a description, use “tk28493 | Checked link” on its own line.',
     single: 'Paste one ticket or note. Its lines stay together; trim the details in the next step.',
     blocks: 'Leave a blank line between tickets or notes. Lines within each block stay together.',
     table: 'Copy cells from Excel or a tab-separated table. Each row becomes an update. Check whether you copied column names.'
@@ -247,6 +258,7 @@ function renderPasteReview() {
   const review = day().pasteReview;
   $('paste-review').hidden = !review?.rows.length;
   if (!review?.rows.length) { $('paste-list').innerHTML = ''; return; }
+  $('paste-shared-description').value = review.shared?.summary || ''; $('paste-shared-category').value = review.shared?.category || ''; $('paste-shared-area').value = review.shared?.area || '';
   $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><h4>Update ${index + 1}</h4><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="3" maxlength="12000">${esc(row.summary)}</textarea></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><div class="fields two organize-fields"><label>Category<select data-field="category" aria-label="Update ${index + 1} category">${categoryOptions(row.category)}</select></label><label>Row / area<input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label></div><p class="small muted">Category is suggested when clear. Change or leave uncategorized.</p><p class="paste-match small"></p><p class="paste-current small muted"></p><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div>`).join('');
   [...$('paste-list').children].forEach((element, index) => syncReviewDecision(element, index));
   updatePasteButton();
@@ -262,9 +274,12 @@ function updatePasteButton() {
 function addQuickUpdates(event) {
   event.preventDefault();
   try {
-    if (!reviewIsCurrent()) day().pasteReview = createPasteReview(day().tasks, $('quick-notes').value, quickOptions());
+    if (!reviewIsCurrent()) {
+      day().pasteReview = createPasteReview(day().tasks, $('quick-notes').value, quickOptions());
+      $('paste-shared-description').value = ''; $('paste-shared-category').value = ''; $('paste-shared-area').value = ''; $('paste-fill-status').textContent = '';
+    }
     if (!day().pasteReview.rows.length) day().pasteReview = null;
-    persist(); renderPasteReview(); updateQuickButton();
+    persist(); renderPasteReview(); updateQuickButton(); renderLivePreview();
     $('paste-list').querySelector('input')?.focus();
   } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
 }
@@ -315,7 +330,7 @@ function chooseDate(date) {
 }
 
 for (const [id, values] of [['task-kind', KINDS], ['task-status', STATUSES], ['task-unit', UNITS]]) $(id).innerHTML = values.map(value => `<option>${esc(value)}</option>`).join('');
-for (const id of ['update-category', 'task-category', 'bulk-category']) $(id).innerHTML = categoryOptions('', id !== 'bulk-category');
+for (const id of ['update-category', 'task-category', 'bulk-category', 'paste-shared-category']) $(id).innerHTML = categoryOptions('', ['update-category', 'task-category'].includes(id));
 const entryType = () => document.querySelector('[name="entry-type"]:checked').value;
 function syncCustom() {
   const field = entryType() === 'field';
@@ -527,6 +542,23 @@ $('quick-notes').addEventListener('keydown', event => {
 });
 $('quick-form').addEventListener('submit', addQuickUpdates);
 $('cancel-paste').addEventListener('click', () => { $('paste-review').hidden = true; $('quick-notes').focus(); });
+for (const id of ['paste-shared-description', 'paste-shared-category', 'paste-shared-area']) $(id).addEventListener('input', () => {
+  if (!day().pasteReview) return;
+  day().pasteReview.shared = { summary: $('paste-shared-description').value, category: $('paste-shared-category').value, area: $('paste-shared-area').value };
+  $('paste-fill-status').textContent = 'Use Fill empty fields to apply these values to the review.';
+  persist();
+});
+$('fill-paste').addEventListener('click', () => {
+  try {
+    if (!reviewIsCurrent()) throw new Error('Refresh the review before filling this batch.');
+    const before = day().pasteReview.rows;
+    const rows = fillPasteReview(before, { summary: $('paste-shared-description').value, category: $('paste-shared-category').value, area: $('paste-shared-area').value });
+    const changed = rows.filter((row, index) => ['summary', 'category', 'area'].some(field => row[field] !== before[index][field])).length;
+    day().pasteReview.rows = rows;
+    persist(); renderPasteReview(); previewContext = { kind: 'review' }; renderLivePreview();
+    $('paste-fill-status').textContent = changed ? `Filled ${changed} ${changed === 1 ? 'update' : 'updates'}. Edit individual fields below if needed.` : 'No empty fields to fill. Enter a shared value, or edit individual updates below.';
+  } catch (error) { $('paste-error').textContent = error.message; $('paste-error').hidden = false; }
+});
 $('paste-list').addEventListener('input', event => {
   const element = event.target.closest('[data-review-index]');
   if (!element) return;
@@ -617,6 +649,10 @@ $('task-list').addEventListener('submit', event => {
   } catch (error) { form.querySelector('.inline-error').textContent = error.message; form.querySelector('.inline-error').hidden = false; }
 });
 $('log-view').addEventListener('change', renderTasks);
+for (const id of ['count-by', 'show-counts']) $(id).addEventListener('change', () => {
+  day().countBy = $('count-by').value; day().showCounts = $('show-counts').checked;
+  persist(); renderCounts();
+});
 $('select-all').addEventListener('change', event => { selectedTasks.clear(); if (event.target.checked) day().tasks.forEach(task => selectedTasks.add(task.id)); renderTasks(); });
 $('clear-selection').addEventListener('click', () => { selectedTasks.clear(); renderTasks(); });
 for (const field of ['category', 'area']) $(`bulk-${field}-apply`).addEventListener('change', event => { $(`bulk-${field}`).disabled = !event.target.checked; updateSelection(); });

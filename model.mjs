@@ -1,11 +1,12 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=3.9';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=3.10';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
 export const UNITS = ['bundles', 'fibers', 'cables', 'connections', 'items'];
 export const STATUSES = ['In progress', 'Completed', 'Blocked'];
 export const ENTRY_TYPES = ['field', 'ticket', 'general', 'quick'];
-export const QUICK_MODES = ['lines', 'single', 'blocks', 'table'];
+export const QUICK_MODES = ['lines', 'single', 'blocks', 'table', 'tickets'];
+export const COUNT_FIELDS = { category: 'Category', area: 'Row / area', status: 'Status' };
 export const CATEGORIES = ['Pulling / installation', 'Dressing / bundling', 'Labeling / testing', 'Rework / troubleshooting', 'General / support'];
 export function suggestCategory(text) {
   text = displayText(text).replace(/\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi, '');
@@ -66,11 +67,11 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 7, defaults: blankHeader(), pastePreferences: null, teamsTarget: '', days: {} }; }
+export function newState() { return { schema: 8, defaults: blankHeader(), pastePreferences: null, teamsTarget: '', days: {} }; }
 export function ensureDay(state, date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!Object.hasOwn(state.days, date)) state.days[date] = {
-    date, header: { ...state.defaults }, tasks: [], undo: null, updateCategoryDraft: 'auto', updateAreaDraft: '', updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
+    date, header: { ...state.defaults }, tasks: [], undo: null, countBy: 'category', showCounts: true, updateCategoryDraft: 'auto', updateAreaDraft: '', updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
   };
   return state.days[date];
 }
@@ -114,6 +115,16 @@ function pastedTable(source) {
 export function splitQuickNotes(source, { mode = 'lines', headers = false } = {}) {
   const text = textField(source).replace(/\r\n|\r/g, '\n');
   if (!QUICK_MODES.includes(mode)) throw new Error('Choose how to separate your pasted updates.');
+  if (mode === 'tickets') return text.split('\n').filter(line => line.trim()).flatMap(line => {
+    const isId = id => /^(?:(?:TK|INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)-?\d+|[A-Z][A-Z0-9]{1,11}-\d+)$/i.test(id) && !/^(ROW|RACK|ROOM)-/i.test(id);
+    const onlyIds = line.trim().split(/[\s,;]+/).filter(Boolean);
+    if (onlyIds.length && onlyIds.every(isId)) return onlyIds;
+    const separator = /\s*\|\s*|\t+|\s+[—–-]\s+/.exec(line);
+    const ids = (separator ? line.slice(0, separator.index) : line).trim().split(/[\s,;]+/).filter(Boolean);
+    const description = separator ? line.slice(separator.index + separator[0].length).trim() : '';
+    if (!ids.length || !ids.every(isId)) throw new Error('Use ticket IDs separated by spaces, commas, or new lines. For a description, use “tk28493 | Checked link” on its own line. No text has been removed.');
+    return ids.map(id => [id, description].filter(Boolean).join('\n'));
+  });
   if (mode === 'table') {
     const rows = pastedTable(text);
     const names = headers ? rows.shift() || [] : [];
@@ -130,11 +141,22 @@ export function taskSummary(task) {
   const identity = [taskName(task), task.ticketId, task.area].filter(Boolean).join(' · ');
   return [identity, taskDetails(task, { detailed: false })].filter(Boolean).join('\n');
 }
-function ticketKey(task) {
+function ticketKeys(task) {
   const identity = displayText(task.ticketId || task.title || (task.summary || '').split('\n')[0]);
-  const refs = identity.match(/\b(?:INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)[ -]?\d+\b|\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi) || [];
-  const keys = [...new Set(refs.filter(ref => !/^(ROW|RACK|ROOM)-/i.test(ref)).map(ref => ref.toUpperCase().replace(/[ -]/g, '')))];
+  const refs = identity.match(/\b(?:TK|INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)[ -]?\d+\b|\b[A-Z][A-Z0-9]{1,11}-\d+\b/gi) || [];
+  return [...new Set(refs.filter(ref => !/^(ROW|RACK|ROOM)-/i.test(ref)).map(ref => ref.toUpperCase().replace(/[ -]/g, '')))];
+}
+function ticketKey(task) {
+  const keys = ticketKeys(task);
   return keys.length === 1 ? keys[0] : '';
+}
+export function workCounts(tasks, field = 'category') {
+  const countBy = Object.hasOwn(COUNT_FIELDS, field) ? field : 'category';
+  const groups = countBy === 'status' ? [...STATUSES, ''].map(status => ({ label: status || 'No status', tasks: tasks.filter(task => task.status === status) })).filter(group => group.tasks.length) : groupTasks(tasks, countBy);
+  const entries = tasks.length, tickets = new Set(tasks.flatMap(ticketKeys)).size;
+  const areas = new Set(tasks.map(task => task.area.trim().toLocaleLowerCase()).filter(Boolean)).size;
+  const summary = `${entries} logged ${entries === 1 ? 'entry' : 'entries'} · ${tickets} unique ${tickets === 1 ? 'ticket' : 'tickets'} · ${areas} ${areas === 1 ? 'row / area' : 'rows / areas'}`;
+  return { entries, tickets, areas, summary, labels: [COUNT_FIELDS[countBy], 'Logged entries'], rows: groups.map(group => [group.label, String(group.tasks.length)]) };
 }
 export function ticketMatches(tasks, update) {
   const key = ticketKey(update);
@@ -156,7 +178,11 @@ export function createPasteReview(tasks, source, { mode = 'lines', headers = fal
     seen.add(key);
     return row;
   });
-  return { source, mode, headers, rows };
+  return { source, mode, headers, rows, shared: { summary: '', category: '', area: '' } };
+}
+export function fillPasteReview(rows, values) {
+  const summary = textField(values.summary).trim(), category = categoryFrom(values.category), area = textField(values.area, 200).trim();
+  return rows.map(row => row.action === 'skip' ? { ...row } : { ...row, summary: row.summary.trim() ? row.summary : summary, category: row.category || category, area: row.area?.trim() ? row.area : area });
 }
 export function applyPasteReview(tasks, rows) {
   const result = [...tasks], updated = new Set();
@@ -202,7 +228,8 @@ export function reportData(day, { detailed = false } = {}) {
   const header = [['Shift', `${clockLabel(day.header.start)}–${clockLabel(day.header.end)}`], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ...(day.header.lead.trim() ? [['Acting lead', day.header.lead.trim()]] : []), ['Crew', day.header.crew || 'Not recorded']];
   const production = productionData(day.tasks, { detailed });
   const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
-  return { heading, header, ...production, blockers, carryover: day.carryover.trim() };
+  const counts = day.showCounts !== false && day.tasks.length ? workCounts(day.tasks, day.countBy) : null;
+  return { heading, header, ...production, counts, blockers, carryover: day.carryover.trim() };
 }
 function productionData(tasks, { detailed = false, columnTasks = tasks } = {}) {
   const hasLocation = columnTasks.some(task => task.area);
@@ -218,10 +245,10 @@ function tableHTML(labels, rows) {
 }
 export function renderProductionTables(tasks, options = {}) {
   const { labels, taskGroups } = productionData(tasks, options);
-  return taskGroups.map(group => `<h3 style="font-size:15px;margin-top:18px;">${escapeHTML(group.label)}</h3>\n${tableHTML(labels, group.rows)}`).join('');
+  return taskGroups.map(group => `<h3 style="font-size:15px;margin-top:18px;">${escapeHTML(group.label)} · ${group.tasks.length} ${group.tasks.length === 1 ? 'entry' : 'entries'}</h3>\n${tableHTML(labels, group.rows)}`).join('');
 }
 export function renderReport(day, options = {}) {
-  const { heading, header, taskRows, taskGroups, blockers, carryover } = reportData(day, options);
+  const { heading, header, taskRows, taskGroups, counts, blockers, carryover } = reportData(day, options);
   let index = 0;
   const updates = taskGroups.map(group => `${group.label}\n${group.tasks.map(task => {
     index++;
@@ -229,8 +256,8 @@ export function renderReport(day, options = {}) {
     return [`${index}. ${taskName(task)}`, task.ticketId ? `Ticket: ${task.ticketId}` : '', task.area ? `Location: ${task.area}` : '', taskDetails(task), `Status: ${task.status}`].filter(Boolean).join('\n');
   }).join('\n\n')}`);
   return {
-    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}<h2 style="font-size:17px;">Production updates</h2>\n${taskRows.length ? renderProductionTables(day.tasks, options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
-    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nPRODUCTION UPDATES\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
+    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}${counts ? `<h2 style="font-size:17px;">Work counts</h2><p>${escapeHTML(counts.summary)}</p>${tableHTML(counts.labels, counts.rows)}` : ''}<h2 style="font-size:17px;">Production updates</h2>\n${taskRows.length ? renderProductionTables(day.tasks, options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
+    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}${counts ? `\n\nWORK COUNTS\n${counts.summary}\nBy ${counts.labels[0].toLowerCase()} (logged entries):\n${counts.rows.map(([label, count]) => `${label}: ${count}`).join('\n')}` : ''}\n\nPRODUCTION UPDATES\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
   };
 }
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -242,7 +269,9 @@ function textField(value, limit = 12000) {
 function reviewFrom(value) {
   if (value == null) return null;
   if (!isObject(value) || !QUICK_MODES.includes(value.mode) || typeof value.headers !== 'boolean' || !Array.isArray(value.rows) || value.rows.length > 1000) throw new Error('This backup has an invalid paste review.');
-  return { source: textField(value.source), mode: value.mode, headers: value.headers, rows: value.rows.map(row => {
+  const shared = value.shared;
+  if (shared != null && !isObject(shared)) throw new Error('This backup has invalid shared batch fields.');
+  return { source: textField(value.source), mode: value.mode, headers: value.headers, shared: { summary: textField(shared?.summary), category: categoryFrom(shared?.category), area: textField(shared?.area, 200) }, rows: value.rows.map(row => {
     if (!isObject(row) || !['', 'add', 'skip', 'update'].includes(row.action)) throw new Error('This backup has an invalid review choice.');
     return { title: textField(row.title, 200), summary: textField(row.summary), category: categoryFrom(row.category), area: textField(row.area, 200), action: row.action, targetId: textField(row.targetId, 100) };
   }) };
@@ -295,7 +324,7 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
   state.teamsTarget = textField(raw.teamsTarget, 4000);
@@ -309,7 +338,7 @@ export function parseBackup(source) {
     const tasks = value.tasks.map(validateTask);
     if (new Set(tasks.map(task => task.id)).size !== tasks.length) throw new Error('This backup contains duplicate task IDs.');
     state.days[date] = { date, header: headerFrom(value.header), tasks, updateTitleDraft: textField(value.updateTitleDraft, 200), updateDescriptionDraft: textField(value.updateDescriptionDraft), quickDraft: textField(value.quickDraft), pasteReview: reviewFrom(value.pasteReview), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
-    Object.assign(state.days[date], { undo: undoFrom(value.undo), updateCategoryDraft: value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' ? 'auto' : categoryFrom(value.updateCategoryDraft), updateAreaDraft: textField(value.updateAreaDraft, 200) });
+    Object.assign(state.days[date], { countBy: Object.hasOwn(COUNT_FIELDS, value.countBy) ? value.countBy : 'category', showCounts: value.showCounts !== false, undo: undoFrom(value.undo), updateCategoryDraft: value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' ? 'auto' : categoryFrom(value.updateCategoryDraft), updateAreaDraft: textField(value.updateAreaDraft, 200) });
   }
   return state;
 }
@@ -322,5 +351,5 @@ export function mergeBackup(current, incoming) {
   for (const [date, day] of Object.entries(current.days)) {
     if (!Object.hasOwn(days, date) || hasDayContent(day, current.defaults)) days[date] = day;
   }
-  return { schema: 7, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
+  return { schema: 8, defaults: Object.values(current.defaults).some(Boolean) ? { ...current.defaults } : { ...incoming.defaults }, pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
 }

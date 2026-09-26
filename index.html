@@ -10,10 +10,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>EOD · Work log</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3.9">
+  <link rel="stylesheet" href="styles.css?v=3.10">
   <script defer src="vendor/jspdf.umd.min.js?v=2"></script>
   <script defer src="vendor/jspdf.plugin.autotable.min.js?v=2"></script>
-  <script type="module" src="app.mjs?v=3.9"></script>
+  <script type="module" src="app.mjs?v=3.10"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to work log</a>
@@ -57,6 +57,7 @@
           <div class="paste-setup">
             <fieldset id="quick-mode" class="paste-modes"><legend>How should this paste be grouped?</legend>
               <label><input type="radio" name="quick-mode" value="lines" checked><span>One update per line</span></label>
+              <label><input type="radio" name="quick-mode" value="tickets"><span>Ticket IDs (spaces / commas)</span></label>
               <label><input type="radio" name="quick-mode" value="single"><span>One whole ticket / note</span></label>
               <label><input type="radio" name="quick-mode" value="blocks"><span>Separate by blank lines</span></label>
               <label><input type="radio" name="quick-mode" value="table"><span>Spreadsheet rows (tabs)</span></label>
@@ -73,7 +74,9 @@
           <h3 id="paste-title">Review pasted updates</h3>
           <p class="small muted composer-intro">The first line is suggested as the title. Edit the result below, then add or update your log.</p>
           <p id="paste-stale" class="notice" hidden>Your paste or grouping changed. Use Refresh review to replace these suggestions with the new paste. This also replaces your review edits.</p>
-          <form id="paste-form"><div id="paste-list"></div><div id="paste-preview-slot" class="preview-slot"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><button id="cancel-paste" type="button" class="text-button">Keep draft &amp; close</button><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
+          <form id="paste-form">
+            <div class="batch-fill"><h4>Fill the batch once <span class="optional">optional</span></h4><p class="small muted">Fills blank fields on non-skipped updates. Individual descriptions and categories stay as entered.</p><label>Shared description<textarea id="paste-shared-description" data-linkable rows="2" maxlength="12000" placeholder="Checked links; all stable."></textarea></label><div class="fields two organize-fields"><label>Shared category<select id="paste-shared-category"></select></label><label>Shared row / area<input id="paste-shared-area" maxlength="200" placeholder="Row A"></label></div><button id="fill-paste" type="button" class="button secondary">Fill empty fields</button><p id="paste-fill-status" class="small muted" role="status"></p></div>
+            <div id="paste-list"></div><div id="paste-preview-slot" class="preview-slot"></div><p id="paste-error" class="small danger-text" role="alert" hidden></p><div class="quick-footer"><button id="cancel-paste" type="button" class="text-button">Keep draft &amp; close</button><button id="save-paste" type="submit" class="button primary">Save updates</button></div></form>
         </section>
         <form id="update-form" class="quick-composer single-composer" aria-labelledby="single-heading">
           <h3 id="single-heading">Add one update</h3>
@@ -94,6 +97,7 @@
         </div>
         <details class="detailed-entry"><summary>Need quantities or cable breakdowns?</summary><div class="quick-tasks" aria-label="Detailed entry types"><button id="add-task">+ Detailed entry</button><button id="add-ticket">Ticket</button><button id="add-general">General work</button><button data-quick="Pulling fiber">Pulling</button><button data-quick="Rolling / bundling">Rolling / bundling</button><button data-quick="Dressing fiber">Dressing</button><button data-quick="Rework">Rework</button></div></details>
         <div class="log-toolbar"><div><h3>Your daily log</h3><p id="task-count" class="muted small"></p></div><div class="log-tools"><button id="bring-forward" class="button secondary" type="button" aria-expanded="false" aria-controls="carry-panel">Bring work forward</button><button id="undo-log" class="button secondary" type="button" disabled>Undo last log change</button></div></div>
+        <section class="work-counts" aria-labelledby="counts-title"><h3 id="counts-title">Work counts</h3><p id="counts-total" class="counts-total" role="status"></p><div class="counts-controls"><label>Count entries by<select id="count-by"><option value="category">Category</option><option value="area">Row / area</option><option value="status">Status</option></select></label><label class="check-label"><input id="show-counts" type="checkbox" checked>Include counts in report &amp; PDF</label></div><div id="counts-breakdown" class="counts-breakdown"></div><p class="small muted">Counts saved entries, identified ticket IDs, and distinct row / area labels. Quantities and completion are separate.</p></section>
         <section id="carry-panel" class="organize-panel" aria-labelledby="carry-title" hidden><h3 id="carry-title">Bring unfinished work forward</h3><p class="small muted">Select only work still open. Ticket details, category, and location carry over. Today’s progress and quantities start blank.</p><label>From day<select id="carry-date"></select></label><div id="carry-list"></div><div class="copy-actions"><button id="save-carry" class="button primary" type="button" disabled>Bring selected work forward</button><button id="close-carry" class="button secondary" type="button">Close</button></div><p id="carry-error" class="small danger-text" role="alert" hidden></p></section>
         <div class="log-view-row"><label>Organize log<select id="log-view"><option value="all">All updates</option><option value="category">By category</option><option value="area">By row / area</option></select></label><label class="check-label"><input id="select-all" type="checkbox">Select all</label><span id="selected-count" class="small muted" role="status"></span></div>
         <form id="bulk-form" class="organize-panel" hidden><p class="small muted">Apply either field to the selected entries. Unchecked fields stay as saved.</p><div class="fields two"><div><label class="check-label"><input id="bulk-category-apply" type="checkbox">Set category</label><select id="bulk-category" aria-label="Category for selected entries" disabled></select></div><div><label class="check-label"><input id="bulk-area-apply" type="checkbox">Set row / area</label><input id="bulk-area" aria-label="Row / area for selected entries" maxlength="200" placeholder="Blank clears the row / area" disabled></div></div><div class="copy-actions"><button id="save-bulk" class="button primary" type="submit" disabled>Apply to selected</button><button id="clear-selection" class="text-button" type="button">Clear selection</button></div></form>
