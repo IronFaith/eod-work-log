@@ -1,11 +1,12 @@
-import { createShift, weekDates, availableWork, assignWork, taskTimeline } from './planner.mjs?v=5.0';
-import { localDate, shiftLabel, taskName, taskDetails, replaceTasks, loggedTasks, escapeHTML as esc } from './model.mjs?v=5.0';
-import { displayText, richText } from './links.mjs?v=5.0';
-import { crewText } from './crew.mjs?v=5.0';
+import { createShift, weekDates, availableWork, assignWork, taskTimeline } from './planner.mjs?v=5.1';
+import { localDate, shiftLabel, taskName, taskDetails, replaceTasks, loggedTasks, escapeHTML as esc } from './model.mjs?v=5.1';
+import { displayText, richText } from './links.mjs?v=5.1';
+import { crewText } from './crew.mjs?v=5.1';
 
 export function setupPlanner({ getState, day, getActiveId, chooseShift, persist, toast, renderTasks, showTab }) {
   const $ = id => document.getElementById(id);
   let week = day().date, historyTask = null, historyShiftId = null;
+  const continueSelection = new Map();
   const shortDate = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const shiftTitle = shift => `${shortDate(shift.date)} · ${shift.shiftName || 'Shift'}${shift.header.start ? ` · ${shift.header.start}` : ''}`;
   function renderSchedule(date = week) {
@@ -51,17 +52,29 @@ export function setupPlanner({ getState, day, getActiveId, chooseShift, persist,
   function renderContinue() {
     const query = $('continue-search').value.toLowerCase().trim();
     const items = availableWork(getState(), getActiveId()).filter(({ task }) => displayText([taskName(task), task.ticketId, task.category, task.area].join(' ')).toLowerCase().includes(query));
-    $('continue-list').innerHTML = items.map(({ shift, task }) => `<div class="continue-item"><div><strong>${esc(displayText(taskName(task)))}</strong><p>${esc(shiftTitle(shift))}${task.category ? ` · ${esc(task.category)}` : ''}</p></div><button class="button secondary" data-continue-source="${esc(shift.id)}" data-continue-task="${esc(task.id)}">Add to shift</button></div>`).join('') || '<p class="dialog-note small muted">No matching unfinished work to add. Work already on this shift is excluded.</p>';
+    $('continue-list').innerHTML = items.map(({ shift, task }) => `<label class="continue-item check-label"><input type="checkbox" data-continue-source="${esc(shift.id)}" data-continue-task="${esc(task.id)}" data-continue-work="${esc(task.workId)}"${continueSelection.has(task.workId) ? ' checked' : ''}><span><strong>${esc(displayText(taskName(task)))}</strong><span class="small muted">${esc(shiftTitle(shift))}${task.category ? ` · ${esc(task.category)}` : ''}</span></span></label>`).join('') || '<p class="dialog-note small muted">No matching unfinished work to add. Work already on this shift is excluded.</p>';
+    updateContinueSelection();
   }
-  $('continue-work').addEventListener('click', () => { $('continue-search').value = ''; renderContinue(); $('continue-dialog').showModal(); });
+  function updateContinueSelection() {
+    $('continue-selected').disabled = !continueSelection.size;
+    $('continue-selected').textContent = continueSelection.size ? `Add ${continueSelection.size} to shift` : 'Add selected to shift';
+  }
+  $('continue-work').addEventListener('click', () => { continueSelection.clear(); $('continue-error').textContent = ''; $('continue-search').value = ''; renderContinue(); $('continue-dialog').showModal(); });
   $('continue-search').addEventListener('input', renderContinue);
-  $('continue-list').addEventListener('click', event => {
-    const button = event.target.closest('[data-continue-task]'); if (!button) return;
+  $('continue-list').addEventListener('change', event => {
+    const input = event.target.closest('[data-continue-task]'); if (!input) return;
+    if (input.checked) continueSelection.set(input.dataset.continueWork, { sourceId: input.dataset.continueSource, taskId: input.dataset.continueTask });
+    else continueSelection.delete(input.dataset.continueWork);
+    updateContinueSelection();
+  });
+  $('continue-selected').addEventListener('click', () => {
     try {
-      const task = assignWork(getState(), button.dataset.continueSource, button.dataset.continueTask, getActiveId());
-      replaceTasks(day(), [...day().tasks, task], 'Continue existing work');
-      const saved = persist(); renderTasks(); renderContinue(); toast(saved ? 'Added as planned work. Use Log progress when ready.' : 'Added — export a backup to keep it.');
-    } catch (error) { toast(error.message); }
+      if (!continueSelection.size) return;
+      const tasks = [...continueSelection.values()].map(({ sourceId, taskId }) => assignWork(getState(), sourceId, taskId, getActiveId()));
+      replaceTasks(day(), [...day().tasks, ...tasks], 'Continue existing work');
+      const saved = persist(); continueSelection.clear(); $('continue-error').textContent = ''; renderTasks(); renderContinue();
+      toast(saved ? `${tasks.length} added as planned work. Use Log progress when ready.` : 'Added — export a backup to keep it.');
+    } catch (error) { $('continue-error').textContent = error.message; }
   });
 
   function openHistory(task) {

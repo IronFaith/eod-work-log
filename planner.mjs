@@ -1,4 +1,4 @@
-import { ensureDay, localDate, validDate, validateTask } from './model.mjs?v=5.0';
+import { ensureDay, localDate, validDate, validateTask } from './model.mjs?v=5.1';
 
 export function weekDates(date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');

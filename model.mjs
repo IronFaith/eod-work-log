@@ -1,5 +1,5 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.0';
-import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.0';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.1';
+import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.1';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];

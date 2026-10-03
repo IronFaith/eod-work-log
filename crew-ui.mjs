@@ -1,7 +1,7 @@
-import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.0';
-import { escapeHTML as esc, displayText } from './links.mjs?v=5.0';
+import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.1';
+import { escapeHTML as esc, displayText } from './links.mjs?v=5.1';
 
-export function setupCrew({ getState, day, persist, toast, showTab, downloadFile }) {
+export function setupCrew({ getState, day, persist, toast, showTab, downloadFile, isLibrary = () => false }) {
   const $ = id => document.getElementById(id);
   let editing = null, importRows = [], removed = null;
   const picked = member => day().crewMembers.some(value => sameMember(value, member));
@@ -13,13 +13,22 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     $('export-shift-crew').disabled = !members.length && !day().header.crew.trim();
   }
   function renderRoster() {
+    const library = isLibrary();
+    $('crew-heading').textContent = library ? 'Saved members' : 'Members for this shift';
+    $('crew-help').textContent = library ? 'Add, edit, or import reusable members. This screen does not change a shift’s crew.' : 'Check the members working this shift. Your selections save immediately.';
+    $('crew-done').textContent = library ? 'Done · Manage' : 'Done · Shift & crew';
+    $('manage-crew-library').hidden = library;
+    $('undo-member-remove').hidden = !library || !removed;
     const state = getState(), group = $('roster-group').value, query = $('roster-search').value.trim().toLowerCase();
     const groups = [...new Set(state.members.map(member => member.team).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     $('roster-group').innerHTML = '<option value="">All teams / shift groups</option>' + groups.map(team => `<option value="${esc(team)}">${esc(team)}</option>`).join('');
     $('roster-group').value = groups.includes(group) ? group : '';
     const members = state.members.filter(member => (!$('roster-group').value || member.team === $('roster-group').value) && `${member.name} ${member.email} ${member.team}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    $('roster-summary').textContent = `${members.length} of ${state.members.length} in library · ${day().crewMembers.length} selected for ${day().date}${day().shiftName ? ` · ${day().shiftName}` : ''}`;
-    $('roster-list').innerHTML = members.map(member => `<article class="roster-row"><label class="check-label"><input type="checkbox" data-member-id="${esc(member.id)}" aria-label="Use ${esc(member.name)} on this shift"${picked(member) ? ' checked' : ''}><span><strong>${esc(member.name)}</strong><small>${esc([member.team, member.email].filter(Boolean).join(' · '))}</small></span></label><div><button class="text-button" type="button" data-edit-member="${esc(member.id)}" aria-label="Edit ${esc(member.name)}">Edit</button><button class="text-button danger-text" type="button" data-remove-member="${esc(member.id)}" aria-label="Remove ${esc(member.name)} from library">Remove</button></div></article>`).join('') || '<p class="empty-state">No matching members. Add a member or import your crew from Excel.</p>';
+    $('roster-summary').textContent = `${members.length} of ${state.members.length} in library${library ? '' : ` · ${day().crewMembers.length} selected for this shift`}`;
+    $('roster-list').innerHTML = members.map(member => {
+      const name = `<span><strong>${esc(member.name)}</strong><small>${esc([member.team, member.email].filter(Boolean).join(' · '))}</small></span>`;
+      return `<article class="roster-row">${library ? `<div class="member-identity">${name}</div><div><button class="text-button" type="button" data-edit-member="${esc(member.id)}" aria-label="Edit ${esc(member.name)}">Edit</button><button class="text-button danger-text" type="button" data-remove-member="${esc(member.id)}" aria-label="Remove ${esc(member.name)} from library">Remove</button></div>` : `<label class="check-label"><input type="checkbox" data-member-id="${esc(member.id)}" aria-label="Use ${esc(member.name)} on this shift"${picked(member) ? ' checked' : ''}>${name}</label>`}</article>`;
+    }).join('') || '<p class="empty-state">No matching members. Add a member or import your crew from Excel.</p>';
     $('export-roster').disabled = !state.members.length;
     renderShiftCrew();
   }
@@ -34,12 +43,14 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     $('member-form').reset(); $('member-error').textContent = '';
     $('member-dialog-title').textContent = member ? 'Edit library member' : 'Add crew member';
     for (const key of ['name', 'email', 'team']) $(`member-${key}`).value = member?.[key] || '';
-    $('member-use').checked = !member; $('member-use-label').hidden = !!member;
+    $('member-use').checked = !member && !isLibrary(); $('member-use-label').hidden = !!member || isLibrary();
     $('member-dialog').showModal(); $('member-name').focus();
   }
   function openImport(use) {
     importRows = []; $('crew-import-source').value = ''; $('crew-import-file').value = '';
-    $('crew-import-preview').hidden = true; $('crew-import-error').textContent = ''; $('crew-import-use').checked = use;
+    $('crew-import-preview').hidden = true; $('crew-import-error').textContent = ''; $('crew-import-use').checked = use && !isLibrary();
+    $('crew-import-use').closest('label').hidden = isLibrary();
+    $('crew-import-title').textContent = isLibrary() ? 'Import into crew library' : 'Import crew';
     $('crew-import-dialog').showModal(); $('crew-import-source').focus();
   }
   function previewImport() {
@@ -55,7 +66,7 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     $('crew-import-save').textContent = `Import ${count} ${count === 1 ? 'member' : 'members'}`; $('crew-import-save').disabled = !count;
   }
   $('choose-crew').addEventListener('click', () => showTab('crew'));
-  $('crew-done').addEventListener('click', () => showTab('shift'));
+  $('crew-done').addEventListener('click', () => showTab(isLibrary() ? 'history' : 'shift'));
   $('roster-search').addEventListener('input', renderRoster);
   $('roster-group').addEventListener('change', renderRoster);
   $('add-member').addEventListener('click', () => memberForm());
@@ -66,13 +77,15 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
       const state = getState(), member = memberFrom({ id: editing || undefined, name: $('member-name').value, email: $('member-email').value, team: $('member-team').value });
       if (state.members.some(value => value.id !== editing && sameMember(value, member))) throw new Error('This person is already in the library. Edit their existing entry.');
       if (!editing && state.members.length >= 2000) throw new Error('Use up to 2,000 members in the library.');
-      if (!editing && $('member-use').checked) addToShift([member]);
+      const use = !editing && !isLibrary() && $('member-use').checked;
+      if (use) addToShift([member]);
       state.members = editing ? state.members.map(value => value.id === editing ? member : value) : [...state.members, member];
-      const saved = persist(); $('member-dialog').close(); renderRoster();
+      const saved = persist(use); $('member-dialog').close(); renderRoster();
       toast(saved ? 'Member saved. Existing shift records keep their crew details.' : 'Member added — export a backup to keep it');
     } catch (error) { $('member-error').textContent = error.message; }
   });
   $('roster-list').addEventListener('change', event => {
+    if (isLibrary()) return;
     const member = getState().members.find(value => value.id === event.target.dataset.memberId);
     if (!member) return;
     try {
@@ -119,10 +132,11 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
       const rows = [...$('crew-import-list').querySelectorAll('input:checked')].map(input => importRows[Number(input.dataset.importIndex)]);
       if (!rows.length) return;
       const result = mergeMembers(getState().members, rows);
-      if ($('crew-import-use').checked) addToShift(result.imported);
+      const use = !isLibrary() && $('crew-import-use').checked;
+      if (use) addToShift(result.imported);
       getState().members = result.members;
-      const saved = persist(); $('crew-import-dialog').close(); renderRoster();
-      toast(saved ? `${result.imported.length} members imported${$('crew-import-use').checked ? ' and selected for this shift' : ' to the library'}` : 'Crew imported — export a backup to keep it');
+      const saved = persist(use); $('crew-import-dialog').close(); renderRoster();
+      toast(saved ? `${result.imported.length} members imported${use ? ' and selected for this shift' : ' to the library'}` : 'Crew imported — export a backup to keep it');
     } catch (error) { $('crew-import-error').textContent = error.message; }
   });
   const csv = (members, filename) => downloadFile(crewCsv(members), filename, 'text/csv;charset=utf-8');

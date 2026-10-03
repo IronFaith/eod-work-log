@@ -1,15 +1,15 @@
-import { setupPlanner } from './planner-ui.mjs?v=5.0';
-import { availableWork, detectPaste } from './planner.mjs?v=5.0';
-import { loggedTasks } from './model.mjs?v=5.0';
-import { setupCrew } from './crew-ui.mjs?v=5.0';
-import { crewText } from './crew.mjs?v=5.0';
-import { workCsv } from './model.mjs?v=5.0';
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.0';
-import { buildReportPdf } from './pdf.mjs?v=5.0';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, carryTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.0';
-import { previewDraft } from './preview.mjs?v=5.0';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.0';
-import { refreshFormatting, sourceField } from './editor.mjs?v=5.0';
+import { setupPlanner } from './planner-ui.mjs?v=5.1';
+import { availableWork, detectPaste } from './planner.mjs?v=5.1';
+import { loggedTasks } from './model.mjs?v=5.1';
+import { setupCrew } from './crew-ui.mjs?v=5.1';
+import { crewText } from './crew.mjs?v=5.1';
+import { workCsv } from './model.mjs?v=5.1';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.1';
+import { buildReportPdf } from './pdf.mjs?v=5.1';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.1';
+import { previewDraft } from './preview.mjs?v=5.1';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.1';
+import { refreshFormatting, sourceField } from './editor.mjs?v=5.1';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeShiftId = activeDate, activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -18,6 +18,7 @@ const editKey = id => `${activeShiftId}:${id}`;
 const categoryField = (value, attributes) => `<input list="category-options" maxlength="80" placeholder="Choose or type a category" value="${esc(value || '')}" ${attributes}>`;
 const livePreview = $('live-preview'), previewDesktop = window.matchMedia('(min-width:1200px)');
 let previewContext = { kind: 'log' }, composerMode = 'single', pasteReviewOpen = false;
+let crewMode = 'pick', shiftReturn = 'today', entryReturn = 'today';
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) state = parseBackup(saved);
@@ -70,18 +71,51 @@ function summary() {
   $('same-day-label').hidden = siblings.length < 2;
   $('same-day-shift').innerHTML = siblings.map((item, i) => `<option value="${esc(item.id)}">${esc(item.shiftName || `Shift ${i + 1}`)}${item.header.start ? ` · ${esc(item.header.start)}` : ''}</option>`).join('');
   $('same-day-shift').value = activeShiftId;
+  renderWorkspaceContext();
 }
 function renderHeader() {
   $('report-date').value = activeDate;
   $('date-caption').textContent = activeTab === 'schedule' ? 'Plan the crew and work. Open a shift to log progress.' : dateLabel(activeDate);
-  const titles = { report: 'Your EOD report', history: 'Manage', shift: 'Shift & crew', crew: 'Crew library', entry: 'Add work', schedule: 'Schedule', today: 'My shift' };
+  const titles = { report: 'Your EOD report', history: 'Manage', shift: 'Shift & crew', crew: crewMode === 'library' ? 'Crew library' : 'Choose crew', templates: 'Presets & defaults', entry: 'Add work', schedule: 'Schedule', today: 'My shift' };
   $('page-title').textContent = titles[activeTab] || 'My shift';
   $('day-eyebrow').textContent = activeTab === 'schedule' ? 'Your work week' : activeTab === 'history' ? 'Workspace tools' : 'EOD · Shift planner';
-  document.querySelector('.date-control').hidden = ['history', 'crew'].includes(activeTab);
+  document.querySelector('.date-control').hidden = !['today', 'schedule'].includes(activeTab);
+  $('date-caption').hidden = !['today', 'schedule'].includes(activeTab);
+  renderWorkspaceContext();
+}
+function returnTab() {
+  if (activeTab === 'crew') return crewMode === 'library' ? 'history' : 'shift';
+  if (activeTab === 'templates') return 'history';
+  if (activeTab === 'shift') return shiftReturn;
+  if (activeTab === 'entry') return entryReturn;
+  return 'today';
+}
+function renderWorkspaceContext() {
+  const labels = { today: 'My shift', history: 'Manage', shift: 'Shift & crew', report: 'Report' };
+  $('workspace-context').hidden = ['today', 'schedule'].includes(activeTab);
+  $('workspace-back').textContent = `← ${labels[returnTab()] || 'My shift'}`;
+  $('shift-done').textContent = `Done · ${labels[shiftReturn] || 'My shift'}`;
+  const scope = activeTab === 'crew' && crewMode === 'library' ? 'Library only · saved shift crews stay unchanged' : activeTab === 'templates' ? 'Reusable setup · applying a preset is separate' : activeTab === 'history' ? 'Workspace tools' : activeTab === 'report' ? 'Report for the selected shift' : 'Editing the selected shift';
+  $('workspace-scope').textContent = scope;
+  $('workspace-shift').textContent = [dateLabel(activeDate), day().shiftName || 'My shift', day().header.start && day().header.end ? shiftLabel(day().header) : '', displayText(day().header.location)].filter(Boolean).join(' · ');
+}
+function renderTemplates() {
+  const setupLabel = setup => [setup.header.start && setup.header.end ? shiftLabel(setup.header) : 'Times not set', displayText(setup.header.location), crewText(setup) ? displayText(crewText(setup)).replace(/\n/g, ' · ') : 'Crew not set'].filter(Boolean).join(' · ');
+  $('preset-source').textContent = `${day().shiftName || 'Selected shift'} · ${dateLabel(activeDate)} · ${setupLabel(day())}`;
+  $('defaults-summary').textContent = setupLabel({ header: state.defaults, crewMembers: state.defaultCrewMembers });
+  $('preset-library').innerHTML = state.shiftPresets.map(preset => `<article class="preset-record"><h3>${esc(preset.name)}</h3><p class="small muted">${esc(setupLabel(preset))}</p><button class="button secondary" type="button" data-use-preset="${esc(preset.id)}">Apply to selected shift</button></article>`).join('') || '<p class="empty-state">No presets yet. Save the selected shift to reuse its setup.</p>';
+  $('preset-names').innerHTML = state.shiftPresets.map(preset => `<option value="${esc(preset.name)}"></option>`).join('');
+  updatePresetHint();
+}
+function updatePresetHint() {
+  const name = $('shift-preset-name').value.trim(), existing = state.shiftPresets.find(preset => preset.name.toLowerCase() === name.toLowerCase());
+  $('preset-save-hint').textContent = existing ? `Saving replaces “${existing.name}” with the selected shift’s setup. Saved shifts stay unchanged.` : 'A new name creates a reusable preset from the selected shift.';
+  $('save-shift-preset').textContent = existing ? 'Update preset' : 'Save preset';
 }
 function fillDay() {
   renderTeamsShortcut();
   $('shift-name').value = day().shiftName;
+  $('lead-options').open = !!day().header.lead.trim();
   $('entry-logged').checked = day().entryLogged;
   $('entry-status').value = day().entryStatus;
   syncEntryIntent();
@@ -152,7 +186,6 @@ function renderTasks() {
   $('undo-log').disabled = !day().undo;
   $('undo-log').title = day().undo ? `Undo: ${day().undo.label}` : 'No log change to undo';
   updateSelection();
-  if (!$('carry-panel').hidden) renderCarryList();
   renderPasteReview();
   renderLivePreview();
 }
@@ -266,18 +299,6 @@ function updateSelection() {
   $('select-all').disabled = !visible.length;
   $('bulk-form').hidden = !count;
   $('save-bulk').disabled = !count || (!$('bulk-category-apply').checked && !$('bulk-area-apply').checked);
-}
-function renderCarryList() {
-  const source = state.days[$('carry-date').value];
-  const tasks = source?.tasks.filter(task => task.status !== 'Completed') || [];
-  $('carry-list').innerHTML = tasks.length ? tasks.map(task => {
-    const already = day().tasks.some(item => item.carriedFrom === `${source.date}:${task.id}`) || ticketMatches(day().tasks, task).length;
-    const untitled = task.entryType === 'quick' && !task.title;
-    const note = already ? 'Already in this day’s log' : untitled ? 'Add a short title in the original day first' : [task.category, task.area].filter(Boolean).join(' · ');
-    return `<label class="carry-choice check-label"><input type="checkbox" data-carry-id="${esc(task.id)}"${already || untitled ? ' disabled' : ''}><span>${esc(displayText(taskName(task)))}<span class="small muted">${esc(note)}</span></span></label>`;
-  }).join('') : '<p class="small muted">No unfinished entries on this day. Updates without a status can be selected manually.</p>';
-  $('save-carry').disabled = true;
-  $('carry-error').hidden = true;
 }
 function updateTitleButton() {
   syncComposer();
@@ -416,15 +437,19 @@ function showTab(tab, scroll = true) {
     $('task-list').querySelector('.inline-editor input')?.focus();
     return;
   }
+  if (tab === 'crew' && activeTab !== 'crew') crewMode = activeTab === 'history' ? 'library' : 'pick';
+  if (tab === 'shift' && !['shift', 'crew'].includes(activeTab)) shiftReturn = activeTab === 'report' ? 'report' : 'today';
+  if (tab === 'entry' && activeTab !== 'entry') entryReturn = ['history', 'report'].includes(activeTab) ? activeTab : 'today';
   activeTab = tab;
-  for (const name of ['today', 'shift', 'entry', 'crew', 'report', 'history', 'schedule']) $(`${name}-panel`).hidden = name !== tab;
+  for (const name of ['today', 'shift', 'entry', 'crew', 'report', 'history', 'schedule', 'templates']) $(`${name}-panel`).hidden = name !== tab;
   document.querySelectorAll('[data-tab]').forEach(button => {
-    if (button.dataset.tab === (['entry', 'shift', 'report'].includes(tab) ? 'today' : tab === 'crew' ? 'history' : tab)) button.setAttribute('aria-current', 'page');
+    if (button.dataset.tab === (['entry', 'shift', 'report'].includes(tab) ? 'today' : tab === 'templates' || tab === 'crew' && crewMode === 'library' ? 'history' : tab === 'crew' ? 'today' : tab)) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
   renderHeader();
   if (tab === 'report') { $('report-blockers').open = day().blockerState === 'Not reviewed' || day().blockerState === 'Reported'; renderReportView(); }
   if (tab === 'crew') renderRoster();
+  if (tab === 'templates') renderTemplates();
   if (tab === 'shift') renderShiftCrew();
   if (tab === 'today' || tab === 'shift') summary();
   renderLivePreview();
@@ -439,7 +464,6 @@ function chooseShift(id) {
   previewContext = { kind: 'log' };
   selectedTasks.clear(); expandedTasks.clear();
   $('work-search').value = ''; $('work-category').value = 'all';
-  $('carry-panel').hidden = true; $('bring-forward').setAttribute('aria-expanded', 'false');
   fillDay(); showTab('today');
 }
 function chooseDate(date) {
@@ -458,6 +482,8 @@ function syncCustom() {
   $('kind-label').hidden = !field;
   $('task-title').required = !field;
   $('title-optional').hidden = !field;
+  $('breakdown-details').hidden = !field && !collectBreakdown().length;
+  if (entryType() === 'ticket') $('request-details').open = true;
   $('custom-label').hidden = !custom;
   $('task-custom').required = custom;
 }
@@ -486,6 +512,8 @@ function openTask(task, edit = false) {
   $('task-category').dataset.suggest = String(!edit && !task.category);
   syncCustom();
   renderBreakdown(task.breakdown);
+  $('request-details').open = entryType() === 'ticket' || !!task.ticketId || !!task.description;
+  $('breakdown-details').hidden = entryType() !== 'field' && !task.breakdown.length;
   $('breakdown-details').open = !!task.breakdown.length;
   $('location-details').open = entryType() === 'field' || !!task.area || !!task.zEnd || task.quantity !== '';
   $('task-dialog').showModal();
@@ -602,7 +630,7 @@ async function exportPdf(share = false) {
     }
   } catch (error) {
     if (error.name === 'AbortError') shareStatus('Sharing closed. You can share again or use Download PDF. Your log has not changed.');
-    else shareStatus(created ? 'Your device could not share the PDF. Use Download PDF, then attach the file in Teams.' : 'The PDF could not be created. Try again, or use Report options & text copy. Your log has not changed.');
+    else shareStatus(created ? 'Your device could not share the PDF. Use Download PDF, then attach the file in Teams.' : 'The PDF could not be created. Try again, or use Copy for Teams. Your log has not changed.');
   } finally {
     pdfExporting = false;
     button.textContent = label;
@@ -635,13 +663,15 @@ $('resume-draft').addEventListener('click', () => {
   else if (composerMode === 'paste' && !day().quickDraft.trim() && !day().pasteReview?.rows.length) composerMode = 'single';
   openEntry();
 });
-$('close-entry').addEventListener('click', () => showTab('today'));
+$('workspace-back').addEventListener('click', () => showTab(returnTab()));
+$('shift-done').addEventListener('click', () => showTab(shiftReturn));
 for (const id of ['work-search', 'work-category']) $(id).addEventListener(id === 'work-search' ? 'input' : 'change', () => { selectedTasks.clear(); renderTasks(); });
 $('clear-filters').addEventListener('click', () => { resetWorkFilters(); renderTasks(); });
 $('task-category').addEventListener('input', () => { $('task-category').dataset.suggest = 'false'; });
 function fillShift() {
   for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).value = day().header[key];
   $('shift-duration').value = day().shiftDuration;
+  $('lead-options').open = !!day().header.lead.trim();
   renderShiftCrew(); summary(); refreshFormatting();
 }
 for (const key of ['start', 'end', 'location', 'supervisor', 'lead', 'crew']) $(`shift-${key}`).addEventListener('input', event => {
@@ -671,13 +701,13 @@ $('save-shift-preset').addEventListener('click', () => {
     if (!existing && state.shiftPresets.length >= 50) throw new Error('Use up to 50 saved shift presets.');
     const preset = shiftPreset({ id: existing?.id, name, duration: day().shiftDuration, header: day().header, crewMembers: day().crewMembers });
     state.shiftPresets = [...state.shiftPresets.filter(value => value.id !== preset.id), preset];
-    const saved = persist(false); renderShiftPresets();
+    const saved = persist(false); renderShiftPresets(); renderTemplates();
     $('shift-preset').value = preset.id; $('apply-shift-preset').disabled = false;
     $('shift-preset-message').classList.remove('danger-text');
     $('shift-preset-message').textContent = saved ? `Saved ${preset.name}, including this crew.` : 'Preset created — export a backup to keep it.';
   } catch (error) { $('shift-preset-message').textContent = error.message; $('shift-preset-message').classList.add('danger-text'); }
 });
-$('save-defaults').addEventListener('click', () => { state.defaults = { ...day().header }; state.defaultShiftDuration = day().shiftDuration; state.defaultCrewMembers = structuredClone(day().crewMembers); const saved = persist(); toast(saved ? 'Shift details and crew saved for future days' : 'Could not save defaults. Export a backup.'); });
+$('save-defaults').addEventListener('click', () => { state.defaults = { ...day().header }; state.defaultShiftDuration = day().shiftDuration; state.defaultCrewMembers = structuredClone(day().crewMembers); const saved = persist(false); renderTemplates(); toast(saved ? 'Default saved for new shifts' : 'Could not save defaults. Export a backup.'); });
 $('report-date').addEventListener('change', event => chooseDate(event.target.value));
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab)));
 $('review-report').addEventListener('click', () => showTab('report'));
@@ -863,25 +893,6 @@ $('undo-log').addEventListener('click', () => {
   const saved = persist(); renderTasks();
   toast(saved ? 'Last log change undone' : 'Change undone — export a backup to keep it');
 });
-$('bring-forward').addEventListener('click', () => {
-  const dates = Object.keys(state.days).filter(date => state.days[date].date < activeDate && state.days[date].tasks.length).sort().reverse();
-  $('carry-date').innerHTML = dates.length ? dates.map(date => `<option value="${date}">${esc(`${dateLabel(state.days[date].date)}${state.days[date].shiftName ? ' · ' + state.days[date].shiftName : ''}`)}</option>`).join('') : '<option value="">No earlier work days saved</option>';
-  $('carry-panel').hidden = false; $('bring-forward').setAttribute('aria-expanded', 'true');
-  $('organize-tools').hidden = false; $('today-panel').classList.add('organizing'); $('toggle-organize').setAttribute('aria-expanded', 'true');
-  renderCarryList(); $('carry-date').focus();
-});
-$('close-carry').addEventListener('click', () => { $('carry-panel').hidden = true; $('bring-forward').setAttribute('aria-expanded', 'false'); $('bring-forward').focus(); });
-$('carry-date').addEventListener('change', renderCarryList);
-$('carry-list').addEventListener('change', () => { $('save-carry').disabled = !$('carry-list').querySelector('input:checked'); });
-$('save-carry').addEventListener('click', () => {
-  try {
-    const ids = [...$('carry-list').querySelectorAll('input:checked')].map(input => input.dataset.carryId);
-    if (!ids.length) return;
-    replaceTasks(day(), carryTasks(state.days[$('carry-date').value], day(), ids).map(task => ids.some(id => task.carriedFrom === `${state.days[$('carry-date').value].date}:${id}`) ? { ...task, logged: false } : task), 'Bring work forward');
-    const saved = persist(); renderTasks();
-    toast(saved ? `${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} ready for today’s progress` : 'Entries added — export a backup to keep them');
-  } catch (error) { $('carry-error').textContent = error.message; $('carry-error').hidden = false; }
-});
 window.addEventListener('beforeunload', event => { if (inlineEdits.size) { event.preventDefault(); event.returnValue = ''; } });
 document.querySelectorAll('[name="blocker-state"]').forEach(input => input.addEventListener('change', () => { day().blockerState = input.value; $('blocker-label').hidden = input.value !== 'Reported'; persist(); renderReportView(); }));
 for (const key of ['blockers', 'carryover']) $(key).addEventListener('input', event => { day()[key] = event.target.value; persist(); renderReportView(); });
@@ -1006,7 +1017,8 @@ $('link-form').addEventListener('submit', event => {
     $('link-dialog').close(); field.focus();
   } catch (error) { $('link-error').textContent = error.message; $('link-error').hidden = false; }
 });
-const { renderRoster, renderShiftCrew } = setupCrew({ getState: () => state, day, persist, toast, showTab, downloadFile });
+const { renderRoster, renderShiftCrew } = setupCrew({ getState: () => state, day, persist, toast, showTab, downloadFile, isLibrary: () => activeTab === 'crew' && crewMode === 'library' });
+$('manage-crew-library').addEventListener('click', () => { crewMode = 'library'; showTab('crew'); });
 $('export-work-csv').addEventListener('click', () => {
   downloadFile(workCsv(loggedTasks(day())), reportFilename().replace(/^EOD-/, 'work-').replace(/\.pdf$/, '.csv'), 'text/csv;charset=utf-8');
 });
@@ -1046,4 +1058,11 @@ function reviewPrimaryPaste() {
 }
 $('entry-import').addEventListener('click', () => chooseComposer(composerMode === 'paste' ? 'single' : 'paste'));
 $('manage-work-import').addEventListener('click', () => { showTab('entry'); chooseComposer('paste'); });
+$('shift-preset-name').setAttribute('list', 'preset-names');
+$('shift-preset-name').addEventListener('input', updatePresetHint);
+$('preset-library').addEventListener('click', event => {
+  const button = event.target.closest('[data-use-preset]'); if (!button) return;
+  $('shift-preset').value = button.dataset.usePreset; $('apply-shift-preset').disabled = false;
+  $('apply-shift-preset').click(); showTab('shift');
+});
 fillDay();
