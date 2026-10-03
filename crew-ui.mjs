@@ -1,5 +1,5 @@
-import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=4.0';
-import { escapeHTML as esc, displayText } from './links.mjs?v=4.0';
+import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.0';
+import { escapeHTML as esc, displayText } from './links.mjs?v=5.0';
 
 export function setupCrew({ getState, day, persist, toast, showTab, downloadFile }) {
   const $ = id => document.getElementById(id);
@@ -18,7 +18,7 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     $('roster-group').innerHTML = '<option value="">All teams / shift groups</option>' + groups.map(team => `<option value="${esc(team)}">${esc(team)}</option>`).join('');
     $('roster-group').value = groups.includes(group) ? group : '';
     const members = state.members.filter(member => (!$('roster-group').value || member.team === $('roster-group').value) && `${member.name} ${member.email} ${member.team}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    $('roster-summary').textContent = `${members.length} of ${state.members.length} in library · ${day().crewMembers.length} selected for ${day().date}`;
+    $('roster-summary').textContent = `${members.length} of ${state.members.length} in library · ${day().crewMembers.length} selected for ${day().date}${day().shiftName ? ` · ${day().shiftName}` : ''}`;
     $('roster-list').innerHTML = members.map(member => `<article class="roster-row"><label class="check-label"><input type="checkbox" data-member-id="${esc(member.id)}" aria-label="Use ${esc(member.name)} on this shift"${picked(member) ? ' checked' : ''}><span><strong>${esc(member.name)}</strong><small>${esc([member.team, member.email].filter(Boolean).join(' · '))}</small></span></label><div><button class="text-button" type="button" data-edit-member="${esc(member.id)}" aria-label="Edit ${esc(member.name)}">Edit</button><button class="text-button danger-text" type="button" data-remove-member="${esc(member.id)}" aria-label="Remove ${esc(member.name)} from library">Remove</button></div></article>`).join('') || '<p class="empty-state">No matching members. Add a member or import your crew from Excel.</p>';
     $('export-roster').disabled = !state.members.length;
     renderShiftCrew();

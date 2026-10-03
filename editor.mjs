@@ -1,4 +1,4 @@
-import { markupTokens, richText } from './links.mjs?v=4.0';
+import { markupTokens, richText } from './links.mjs?v=5.0';
 
 const editors = new WeakMap();
 const selector = '[data-linkable], #blockers, #carryover';
