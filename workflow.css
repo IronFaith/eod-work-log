@@ -53,3 +53,5 @@ main{max-width:1120px}
   #member-form .fields.two{grid-template-columns:1fr}.bottom-nav{padding-left:6px;padding-right:6px}.bottom-nav button{font-size:11px;padding:6px 3px}
 }
 @media print{.report-blockers{display:none}}
+
+.import-member .check-label{align-items:flex-start}.import-member>label+label{margin-top:10px}.import-member span{min-width:0;overflow-wrap:anywhere}

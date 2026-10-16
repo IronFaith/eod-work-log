@@ -3,6 +3,32 @@ import assert from 'node:assert/strict';
 import { memberFrom, mergeMembers, readCrewTable, crewCsv, readTable, writeTable } from '../crew.mjs';
 import * as m from '../model.mjs';
 
+test('plain crew paste accepts names and bullets while preserving commas inside a name', () => {
+  const members = readCrewTable('Crew:\n• Alex Rivera\n2. Sam Lee\nAlex Rivera\nRivera, José');
+  assert.deepEqual(members.map(member => member.name), ['Alex Rivera', 'Sam Lee', 'Rivera, José']);
+  assert.deepEqual(readCrewTable('Alex Rivera, Sam Lee; Jo Park', { format: 'commas' }).map(member => member.name), ['Alex Rivera', 'Sam Lee', 'Jo Park']);
+  assert.deepEqual(readCrewTable('**Alex Rivera**\n[Sam Lee](https://example.com)').map(member => member.name), ['Alex Rivera', 'Sam Lee']);
+});
+
+test('plain crew paste rejects empty lists and unlabelled spreadsheet data instead of guessing members', () => {
+  assert.throws(() => readCrewTable('Crew:\n'), /name/i);
+  assert.throws(() => readCrewTable('Alex Rivera\talex@example.com'), /Name column/i);
+  assert.throws(() => readCrewTable('Alex Rivera,alex@example.com'), /Name column/i);
+  assert.throws(() => readCrewTable('Alex Rivera', { format: 'table' }), /Name column/i);
+});
+
+test('crew reuse preserves contact details and requires a choice for people with the same name', () => {
+  const first = memberFrom({ name: 'Sam Lee', email: 'sam.one@example.com', team: 'Night' });
+  const second = memberFrom({ name: 'Sam Lee', email: 'sam.two@example.com', team: 'Day' });
+  const incoming = readCrewTable('Sam Lee');
+  const result = mergeMembers([first], incoming);
+  assert.equal(result.imported[0].id, first.id);
+  assert.equal(result.imported[0].email, first.email);
+  assert.equal(result.imported[0].team, first.team);
+  assert.throws(() => mergeMembers([first, second], incoming), /more than one|choose/i);
+  assert.equal(mergeMembers([first, second], [{ ...incoming[0], id: second.id }]).imported[0].email, second.email);
+});
+
 test('crew CSV and Excel tables round-trip names, quotes and accents; malformed input is rejected', () => {
   const members = readCrewTable('\uFEFFName,Email,Team\r\n"Rivera, José",jose@example.com,"Night, A"\r\n"Ana ""AJ"" Test",,Day');
   assert.equal(members[0].name, 'Rivera, José');
@@ -10,6 +36,7 @@ test('crew CSV and Excel tables round-trip names, quotes and accents; malformed 
   assert.deepEqual(readCrewTable(crewCsv(members)).map(({ id, ...rest }) => rest), members.map(({ id, ...rest }) => rest));
   assert.equal(readCrewTable('Name\tWork email\tShift\nTest One\tone@example.com\tNights')[0].team, 'Nights');
   assert.equal(readCrewTable('Name;Email;Team\nTest Two;;Days')[0].name, 'Test Two');
+  assert.equal(readCrewTable('Department,Full_Name,Email\nOps,Alex Rivera,alex@example.com')[0].email, 'alex@example.com');
   assert.throws(() => readCrewTable('Name,Email\n"Missing quote,test@example.com'), /quote/);
   assert.throws(() => readCrewTable('Name,Email\nTest,bad-email'), /email/);
   assert.throws(() => readCrewTable('Name\nOne,Two'), /extra cells/);

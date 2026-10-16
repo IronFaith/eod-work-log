@@ -1,14 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as m from '../model.mjs';
-import { createShift, assignWork, availableWork, taskTimeline, weekDates, detectPaste } from '../planner.mjs';
+import { createShift, assignWork, availableWork, taskTimeline, weekDates, detectPaste, ticketHistory } from '../planner.mjs';
+
+test('ticket history uses the latest earlier shift and excludes future or already assigned work', () => {
+  const state = m.newState(), first = createShift(state, '2026-10-14'), second = createShift(state, '2026-10-15'), target = createShift(state, '2026-10-16'), future = createShift(state, '2026-10-17');
+  first.tasks = [m.validateTask({ ...m.nextTask({ entryType: 'quick' }), title: 'TK420', summary: 'First update' })];
+  second.tasks = [{ ...assignWork(state, first.id, first.tasks[0].id, second.id), summary: 'Latest progress', logged: true, status: 'Completed' }];
+  future.tasks = [m.validateTask({ ...m.nextTask({ entryType: 'quick' }), title: 'TK421' })];
+  const later = createShift(state, target.date, { name: 'Later shift' });
+  later.header.start = '18:00'; target.header.start = '06:00'; later.tasks = [...future.tasks];
+  const history = ticketHistory(state, target.id);
+  assert.equal(history.length, 1);
+  assert.equal(history[0].task.summary, 'Latest progress');
+  assert.equal(history[0].shift.id, second.id);
+  target.tasks = [{ ...second.tasks[0], id: crypto.randomUUID() }];
+  assert.deepEqual(ticketHistory(state, target.id), []);
+});
 
 test('multiple shifts preserve independent crews, drafts and tasks through migration and backup merge', () => {
   const state = m.newState(), original = m.ensureDay(state, '2026-10-02');
   original.header.crew = 'Example day crew'; original.updatedAt = '2026-10-02T12:00:00Z'; original.updateTitleDraft = 'TK421\nTK422';
   state.schema = 9;
   const restored = m.parseBackup(m.exportBackup(state));
-  assert.equal(restored.schema, 10);
+  assert.equal(restored.schema, 11);
   const night = createShift(restored, original.date, { name: 'Night' });
   night.header.crew = 'Example night crew'; night.entryLogged = false;
   night.tasks = m.applyPasteReview([], m.createPasteReview([], 'TK430 TK431', { mode: 'tickets' }).rows, { logged: false });

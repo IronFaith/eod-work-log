@@ -1,5 +1,5 @@
-import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.1';
-import { escapeHTML as esc, displayText } from './links.mjs?v=5.1';
+import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.2';
+import { escapeHTML as esc, displayText } from './links.mjs?v=5.2';
 
 export function setupCrew({ getState, day, persist, toast, showTab, downloadFile, isLibrary = () => false }) {
   const $ = id => document.getElementById(id);
@@ -8,7 +8,7 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
   function renderShiftCrew() {
     const members = day().crewMembers;
     $('shift-crew-count').textContent = `${members.length} selected ${members.length === 1 ? 'member' : 'members'}`;
-    $('shift-crew-list').innerHTML = members.length ? members.map(member => `<div class="crew-chip"><span>${esc(member.name)}${member.team ? `<small>${esc(member.team)}</small>` : ''}</span><button type="button" class="text-button" data-remove-crew="${esc(member.id)}" aria-label="Remove ${esc(member.name)} from this shift">×</button></div>`).join('') : '<p class="small muted">Choose saved members or import a crew for this shift.</p>';
+    $('shift-crew-list').innerHTML = members.length ? members.map(member => `<div class="crew-chip"><span>${esc(member.name)}${member.team ? `<small>${esc(member.team)}</small>` : ''}</span><button type="button" class="text-button" data-remove-crew="${esc(member.id)}" aria-label="Remove ${esc(member.name)} from this shift">×</button></div>`).join('') : '<p class="small muted">Choose saved members or paste names for this shift.</p>';
     $('legacy-crew').open = !!day().header.crew.trim();
     $('export-shift-crew').disabled = !members.length && !day().header.crew.trim();
   }
@@ -48,22 +48,30 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
   }
   function openImport(use) {
     importRows = []; $('crew-import-source').value = ''; $('crew-import-file').value = '';
+    $('crew-import-format').value = 'auto';
     $('crew-import-preview').hidden = true; $('crew-import-error').textContent = ''; $('crew-import-use').checked = use && !isLibrary();
     $('crew-import-use').closest('label').hidden = isLibrary();
-    $('crew-import-title').textContent = isLibrary() ? 'Import into crew library' : 'Import crew';
+    $('crew-import-title').textContent = isLibrary() ? 'Add to crew library' : 'Paste crew / import';
     $('crew-import-dialog').showModal(); $('crew-import-source').focus();
   }
   function previewImport() {
     try {
-      importRows = readCrewTable($('crew-import-source').value);
-      $('crew-import-list').innerHTML = importRows.map((member, index) => `<label class="check-label import-member"><input type="checkbox" data-import-index="${index}" checked><span>${esc(member.name)}<small>${esc([member.email, member.team].filter(Boolean).join(' · '))}</small></span></label>`).join('');
+      importRows = mergeMembers([], readCrewTable($('crew-import-source').value, { format: $('crew-import-format').value })).imported;
+      $('crew-import-list').innerHTML = importRows.map((member, index) => {
+        const matches = getState().members.filter(saved => sameMember(saved, member));
+        const details = matches.length === 1 ? matches[0] : member;
+        const label = matches.length > 1 ? 'Choose the saved member below' : matches.length ? 'Already saved · reuse member' : 'New member';
+        return `<div class="import-member"><label class="check-label"><input type="checkbox" data-import-index="${index}" checked><span>${esc(member.name)}<small>${esc(label)}</small><small>${esc([details.email, details.team].filter(Boolean).join(' · '))}</small></span></label>${matches.length > 1 ? `<label>Which ${esc(member.name)}?<select data-import-match="${index}"><option value="">Choose a saved member</option>${matches.map(saved => `<option value="${esc(saved.id)}">${esc([saved.name, saved.email, saved.team].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}</div>`;
+      }).join('');
       $('crew-import-preview').hidden = false; $('crew-import-error').textContent = '';
       updateImportCount();
     } catch (error) { $('crew-import-preview').hidden = true; $('crew-import-error').textContent = error.message; }
   }
   function updateImportCount() {
-    const count = $('crew-import-list').querySelectorAll('input:checked').length;
-    $('crew-import-save').textContent = `Import ${count} ${count === 1 ? 'member' : 'members'}`; $('crew-import-save').disabled = !count;
+    const selected = [...$('crew-import-list').querySelectorAll('input:checked')], count = selected.length;
+    const unresolved = selected.some(input => { const choice = input.closest('.import-member').querySelector('select'); return choice && !choice.value; });
+    $('crew-import-save').textContent = unresolved ? 'Choose matching members' : `Use ${count} ${count === 1 ? 'member' : 'members'}`;
+    $('crew-import-save').disabled = !count || unresolved;
   }
   $('choose-crew').addEventListener('click', () => showTab('crew'));
   $('crew-done').addEventListener('click', () => showTab(isLibrary() ? 'history' : 'shift'));
@@ -117,19 +125,24 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
   $('import-roster').addEventListener('click', () => openImport(false));
   $('close-crew-import').addEventListener('click', () => $('crew-import-dialog').close());
   $('crew-import-source').addEventListener('input', () => { importRows = []; $('crew-import-preview').hidden = true; });
+  $('crew-import-format').addEventListener('change', () => { importRows = []; $('crew-import-preview').hidden = true; });
   $('crew-import-file').addEventListener('change', async event => {
     const file = event.target.files[0]; if (!file) return;
     try {
       if (file.size > 1e6) throw new Error('Choose a CSV smaller than 1 MB.');
       if (!/\.(csv|tsv|txt)$/i.test(file.name)) throw new Error('In Excel, save the file as CSV UTF-8, then import that CSV.');
-      $('crew-import-source').value = await file.text(); previewImport();
+      $('crew-import-source').value = await file.text(); $('crew-import-format').value = /\.txt$/i.test(file.name) ? 'auto' : 'table'; previewImport();
     } catch (error) { importRows = []; $('crew-import-preview').hidden = true; $('crew-import-error').textContent = error.message; }
   });
   $('crew-import-review').addEventListener('click', previewImport);
   $('crew-import-list').addEventListener('change', updateImportCount);
   $('crew-import-save').addEventListener('click', () => {
     try {
-      const rows = [...$('crew-import-list').querySelectorAll('input:checked')].map(input => importRows[Number(input.dataset.importIndex)]);
+      const rows = [...$('crew-import-list').querySelectorAll('input:checked')].map(input => {
+        const member = importRows[Number(input.dataset.importIndex)], choice = input.closest('.import-member').querySelector('select');
+        if (choice && !choice.value) throw new Error(`Choose the saved member for ${member.name}, or uncheck that name.`);
+        return choice ? { ...member, id: choice.value } : member;
+      });
       if (!rows.length) return;
       const result = mergeMembers(getState().members, rows);
       const use = !isLibrary() && $('crew-import-use').checked;

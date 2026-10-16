@@ -1,4 +1,4 @@
-import { makeLink, displayText } from './links.mjs?v=5.1';
+import { makeLink, displayText } from './links.mjs?v=5.2';
 
 function field(value, label, limit) {
   if (value == null) return '';
@@ -25,7 +25,12 @@ export function sameMember(a, b) {
 export function mergeMembers(current, incoming) {
   const members = membersFrom(current), imported = [];
   for (const value of membersFrom(incoming)) {
-    const index = members.findIndex(member => sameMember(member, value));
+    let index = members.findIndex(member => member.id === value.id);
+    if (index < 0) {
+      const matches = members.filter(member => sameMember(member, value));
+      if (matches.length > 1) throw new Error(`More than one saved member matches ${value.name}. Choose the person in the review, or include their work email.`);
+      index = matches.length ? members.indexOf(matches[0]) : -1;
+    }
     const member = index < 0 ? value : { ...value, id: members[index].id, email: value.email || members[index].email, team: value.team || members[index].team };
     if (index < 0) members.push(member); else members[index] = member;
     if (!imported.some(item => sameMember(item, member))) imported.push(member);
@@ -78,7 +83,22 @@ export function writeTable(rows) {
   const cell = value => { let text = String(value ?? ''); if (/^[\s\uFEFF]*[=+@-]/.test(text) || /^[\t\r]/.test(text)) text = "'" + text; return `"${text.replace(/"/g, '""')}"`; };
   return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n') + '\r\n';
 }
-export function readCrewTable(source) {
+export function readCrewTable(source, { format = 'auto' } = {}) {
+  if (typeof source !== 'string' || source.length > 1e6) throw new Error('Use a name list or table smaller than 1 MB.');
+  if (!['auto', 'names', 'commas', 'table'].includes(format)) throw new Error('Choose a crew paste format.');
+  const firstLine = source.replace(/^\uFEFF/, '').trim().split(/\r?\n/)[0];
+  let headings = [];
+  try { headings = (readTable(firstLine)[0] || []).map(name => name.toLowerCase().replace(/[ _-]+/g, ' ').trim()); } catch { /* Quotes can be literal in a plain name list. */ }
+  const table = format === 'table' || format === 'auto' && headings.some(name => ['name', 'member', 'crew member', 'full name', 'email', 'work email', 'email address', 'upn', 'team', 'group', 'shift', 'shift group', 'team / shift group'].includes(name));
+  if (!table) {
+    if (/[\t@]/.test(displayText(source))) throw new Error('For names with email or other columns, include a Name column and use CSV / Excel table.');
+    const names = displayText(source).replace(/^\uFEFF/, '').replace(/\r\n|\r/g, '\n')
+      .split(format === 'commas' ? /[\n,;]+/ : /[\n;]+/)
+      .map(name => name.trim().replace(/^(?:crew(?: members)?|members)\s*:\s*/i, '').replace(/^(?:[•●▪*–—-]|\d+[.)])\s+/, '').trim()).filter(Boolean);
+    if (!names.length) throw new Error('Paste at least one crew name.');
+    const unique = [...new Map(names.map(name => [name.toLowerCase(), name])).values()];
+    return membersFrom(unique.map(name => ({ name })));
+  }
   const rows = readTable(source), headers = (rows.shift() || []).map(name => name.toLowerCase().replace(/[ _-]+/g, ' ').trim());
   const find = names => headers.findIndex(name => names.includes(name));
   const name = find(['name', 'member', 'crew member', 'full name']), email = find(['email', 'work email', 'email address', 'upn']), team = find(['team', 'group', 'shift', 'shift group', 'team / shift group']);

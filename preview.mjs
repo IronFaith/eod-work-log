@@ -1,10 +1,10 @@
-import { applyPasteReview, validateTask } from './model.mjs?v=5.1';
+import { applyPasteReview, validateTask } from './model.mjs?v=5.2';
 
 // Project the current form onto a copy of the log. Previewing never saves work.
-export function previewDraft(savedTasks, { task, editingId = null, rows, logged = true, status = '' } = {}) {
+export function previewDraft(savedTasks, { task, editingId = null, rows, logged = true, status = '', history = [] } = {}) {
   if (rows) {
-    const included = rows.filter(row => row.action === 'add' || row.action === 'update');
-    const allTasks = applyPasteReview(savedTasks, included, { logged, status });
+    const included = rows.filter(row => ['add', 'update', 'continue'].includes(row.action));
+    const allTasks = applyPasteReview(savedTasks, included, { logged, status, history });
     const existing = new Set(savedTasks.map(task => task.id));
     const updated = new Set(included.filter(row => row.action === 'update').map(row => row.targetId));
     return { tasks: allTasks.filter(task => !existing.has(task.id) || updated.has(task.id)), allTasks, pending: rows.filter(row => !row.action).length, skipped: rows.filter(row => row.action === 'skip').length };

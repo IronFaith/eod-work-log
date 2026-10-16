@@ -1,4 +1,15 @@
-import { ensureDay, localDate, validDate, validateTask } from './model.mjs?v=5.1';
+import { ensureDay, localDate, validDate, validateTask } from './model.mjs?v=5.2';
+
+// One latest snapshot per work item, only from shifts before the selected shift.
+export function ticketHistory(state, targetId) {
+  const target = state.days[targetId];
+  if (!target) return [];
+  const latest = new Map(), assigned = new Set(target.tasks.map(task => task.workId));
+  const shifts = Object.values(state.days).filter(shift => shift.id !== targetId && (shift.date < target.date || shift.date === target.date && (!target.header.start || !shift.header.start || shift.header.start <= target.header.start)))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.header.start.localeCompare(b.header.start) || a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+  for (const shift of shifts) for (const task of shift.tasks) if (!assigned.has(task.workId)) latest.set(task.workId, { shift, task });
+  return [...latest.values()].reverse();
+}
 
 export function weekDates(date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');

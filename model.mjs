@@ -1,5 +1,5 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.1';
-import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.1';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.2';
+import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.2';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
@@ -107,7 +107,7 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 10, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], previewOpen: false, pastePreferences: null, teamsTarget: '', days: {} }; }
+export function newState() { return { schema: 11, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], previewOpen: false, pastePreferences: null, teamsTarget: '', days: {} }; }
 export function validShiftId(id, date) { return validDate(date) && (id === date || new RegExp(`^${date}~[a-zA-Z0-9-]{1,100}$`).test(id)); }
 export function ensureDay(state, date, id = date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
@@ -222,15 +222,15 @@ export function ticketMatches(tasks, update) {
   const key = ticketKey(update);
   return key ? tasks.filter(task => ticketKey(task) === key) : [];
 }
-export function createPasteReview(tasks, source, { mode = 'lines', headers = false } = {}) {
+export function createPasteReview(tasks, source, { mode = 'lines', headers = false, history = [] } = {}) {
   const summaries = splitQuickNotes(source, { mode, headers });
   if (summaries.length > 1000) throw new Error('Review up to 1,000 updates at a time.');
   const seen = new Set(), existing = new Set(tasks.map(task => (task.entryType === 'quick' ? [task.title, task.summary].filter(Boolean).join('\n') : taskSummary(task)).trim()));
   const csvRows = mode === 'csv' ? workCsvRows(source) : null;
   const rows = summaries.map((text, index) => {
     const [first, ...rest] = text.split('\n');
-    const row = { title: first.length <= 200 ? first : '', summary: first.length <= 200 ? rest.join('\n').trim() : text, action: 'add', targetId: '' };
-    const matches = ticketMatches(tasks, row);
+    const row = { title: first.length <= 200 ? first : '', summary: first.length <= 200 ? rest.join('\n').trim() : text, action: 'add', targetId: '', sourceShiftId: '' };
+    const matches = ticketMatches(tasks, row).concat(ticketMatches(history.map(item => item.task), row));
     row.category = matches.length === 1 ? matches[0].category || '' : suggestCategory(text);
     row.area = matches.length === 1 ? matches[0].area : '';
     if (csvRows) Object.assign(row, csvRows[index]);
@@ -246,15 +246,21 @@ export function fillPasteReview(rows, values) {
   const summary = textField(values.summary).trim(), category = categoryFrom(values.category), area = textField(values.area, 200).trim();
   return rows.map(row => row.action === 'skip' ? { ...row } : { ...row, summary: row.summary.trim() ? row.summary : summary, category: row.category || category, area: row.area?.trim() ? row.area : area });
 }
-export function applyPasteReview(tasks, rows, { logged = true, status = '' } = {}) {
+export function applyPasteReview(tasks, rows, { logged = true, status = '', history = [] } = {}) {
   const result = [...tasks], updated = new Set();
   for (const row of rows) {
     if (row.action === 'skip') continue;
-    if (!['add', 'update'].includes(row.action)) throw new Error('Choose how to save each matching ticket.');
+    if (!['add', 'update', 'continue'].includes(row.action)) throw new Error('Choose how to save each matching ticket.');
     if (!row.title.trim()) throw new Error('Add a short title for each included update.');
     const title = row.title.trim(), summary = row.summary.trim();
     if (row.action === 'add') result.push(validateTask({ ...nextTask(), entryType: 'quick', title, summary, category: row.category || '', area: row.area || '', status, logged }));
-    else {
+    else if (row.action === 'continue') {
+      const source = history.find(item => item.shift.id === row.sourceShiftId && item.task.id === row.targetId);
+      if (!source || !ticketMatches([source.task], row).length) throw new Error('The earlier entry no longer matches this ticket. Review your choice.');
+      const original = source.task;
+      if (result.some(task => task.workId === original.workId)) throw new Error('This work is already on this shift. Continue it only once per batch, or update its entry.');
+      result.push(validateTask({ ...original, id: crypto.randomUUID(), title, logged, status: status || 'In progress', summary: '', notes: '', quantity: '', breakdown: [], carriedFrom: '', category: row.category ?? original.category, area: row.area ?? original.area, ...(original.entryType === 'quick' ? { summary } : { notes: summary }) }));
+    } else {
       const index = tasks.findIndex(task => task.id === row.targetId);
       if (index < 0 || !ticketMatches(tasks, row).some(task => task.id === row.targetId)) throw new Error('The selected entry no longer matches this ticket. Review your choice.');
       if (updated.has(row.targetId)) throw new Error('Update each existing entry only once per batch. Skip or add the other update separately.');
@@ -336,8 +342,8 @@ function reviewFrom(value) {
   const shared = value.shared;
   if (shared != null && !isObject(shared)) throw new Error('This backup has invalid shared batch fields.');
   return { source: textField(value.source), mode: value.mode, headers: value.headers, shared: { summary: textField(shared?.summary), category: categoryFrom(shared?.category), area: textField(shared?.area, 200) }, rows: value.rows.map(row => {
-    if (!isObject(row) || !['', 'add', 'skip', 'update'].includes(row.action)) throw new Error('This backup has an invalid review choice.');
-    return { title: textField(row.title, 200), summary: textField(row.summary), category: categoryFrom(row.category), area: textField(row.area, 200), action: row.action, targetId: textField(row.targetId, 100) };
+    if (!isObject(row) || !['', 'add', 'skip', 'update', 'continue'].includes(row.action)) throw new Error('This backup has an invalid review choice.');
+    return { title: textField(row.title, 200), summary: textField(row.summary), category: categoryFrom(row.category), area: textField(row.area, 200), action: row.action, targetId: textField(row.targetId, 100), sourceShiftId: textField(row.sourceShiftId, 120) };
   }) };
 }
 function headerFrom(value) {
@@ -391,7 +397,7 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
   state.previewOpen = raw.previewOpen === true;
@@ -440,5 +446,5 @@ export function mergeBackup(current, incoming) {
   for (const preset of [...(current.shiftPresets || []), ...(incoming.shiftPresets || [])]) if (!presets.has(preset.name.toLowerCase()) && ![...presets.values()].some(item => item.id === preset.id)) presets.set(preset.name.toLowerCase(), preset);
   if (presets.size > 50) throw new Error('The combined backup has more than 50 shift presets.');
   const currentDefaults = Object.values(current.defaults).some(Boolean);
-  return { schema: 10, previewOpen: current.previewOpen === true, defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
+  return { schema: 11, previewOpen: current.previewOpen === true, defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
 }

@@ -1,15 +1,15 @@
-import { setupPlanner } from './planner-ui.mjs?v=5.1';
-import { availableWork, detectPaste } from './planner.mjs?v=5.1';
-import { loggedTasks } from './model.mjs?v=5.1';
-import { setupCrew } from './crew-ui.mjs?v=5.1';
-import { crewText } from './crew.mjs?v=5.1';
-import { workCsv } from './model.mjs?v=5.1';
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.1';
-import { buildReportPdf } from './pdf.mjs?v=5.1';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.1';
-import { previewDraft } from './preview.mjs?v=5.1';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.1';
-import { refreshFormatting, sourceField } from './editor.mjs?v=5.1';
+import { setupPlanner } from './planner-ui.mjs?v=5.2';
+import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.2';
+import { loggedTasks } from './model.mjs?v=5.2';
+import { setupCrew } from './crew-ui.mjs?v=5.2';
+import { crewText } from './crew.mjs?v=5.2';
+import { workCsv } from './model.mjs?v=5.2';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.2';
+import { buildReportPdf } from './pdf.mjs?v=5.2';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.2';
+import { previewDraft } from './preview.mjs?v=5.2';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.2';
+import { refreshFormatting, sourceField } from './editor.mjs?v=5.2';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeShiftId = activeDate, activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -255,10 +255,10 @@ function renderLivePreview() {
   try {
     if (kind === 'log') result = { tasks: day().tasks, allTasks: day().tasks };
     else if (kind === 'single') {
-      const source = $('update-title').value, options = detectPaste(source);
+      const source = $('update-title').value, options = detectPaste(source) || (hasTicketMatch(source) ? { mode: 'single', headers: false } : null);
       if (options) {
-        const rows = fillPasteReview(createPasteReview(day().tasks, source, options).rows, { summary: $('update-description').value, category: $('update-category').value, area: $('update-area').value });
-        result = previewDraft(day().tasks, { rows, logged: $('entry-logged').checked, status: $('entry-status').value });
+        const rows = fillPasteReview(createPasteReview(day().tasks, source, reviewOptions(options)).rows, { summary: $('update-description').value, category: $('update-category').value, area: $('update-area').value });
+        result = previewDraft(day().tasks, { rows, logged: $('entry-logged').checked, status: $('entry-status').value, history: ticketHistory(state, activeShiftId) });
         context = 'Pasted items · review before saving';
         if (result.pending) notice = `${result.pending} matching tickets need a choice in Review.`;
       } else result = previewDraft(day().tasks, { task: source.trim() || $('update-description').value.trim() ? currentSingleTask() : null });
@@ -267,8 +267,8 @@ function renderLivePreview() {
     else if (kind === 'inline') result = previewDraft(day().tasks, { task: currentInlineTask(id), editingId: id });
     else {
       if (kind === 'review' && !reviewIsCurrent()) throw new Error('Your paste changed. Refresh the review before previewing those choices.');
-      const rows = reviewIsCurrent() ? day().pasteReview.rows : createPasteReview(day().tasks, $('quick-notes').value, quickOptions()).rows;
-      result = previewDraft(day().tasks, { rows, logged: $('entry-logged').checked, status: $('entry-status').value });
+      const rows = reviewIsCurrent() ? day().pasteReview.rows : createPasteReview(day().tasks, $('quick-notes').value, reviewOptions(quickOptions())).rows;
+      result = previewDraft(day().tasks, { rows, logged: $('entry-logged').checked, status: $('entry-status').value, history: ticketHistory(state, activeShiftId) });
       notice = [result.pending ? `${result.pending} matching ${result.pending === 1 ? 'ticket needs' : 'tickets need'} a Save as choice in Review before appearing here.` : '', result.skipped ? `${result.skipped} skipped ${result.skipped === 1 ? 'update is' : 'updates are'} excluded.` : ''].filter(Boolean).join(' ');
     }
     const planned = result.tasks.filter(task => task.logged === false).length;
@@ -303,7 +303,7 @@ function updateSelection() {
 function updateTitleButton() {
   syncComposer();
   $('save-update').disabled = !$('update-title').value.trim();
-  $('save-update').textContent = detectPaste($('update-title').value) ? 'Review pasted items' : $('entry-logged').checked ? 'Add to shift log' : 'Add planned work';
+  $('save-update').textContent = detectPaste($('update-title').value) ? 'Review pasted items' : hasTicketMatch($('update-title').value) ? 'Review existing ticket' : $('entry-logged').checked ? 'Add to shift log' : 'Add planned work';
   const suggestion = suggestCategory(`${$('update-title').value}\n${$('update-description').value}`);
   $('update-category').placeholder = day().updateCategoryAuto && suggestion ? `Suggested: ${suggestion}` : 'Choose or type a category';
   $('update-error').hidden = true;
@@ -313,7 +313,7 @@ function addTitledUpdate(event) {
   try {
     const title = $('update-title').value.trim();
     if (!title) throw new Error('Enter a ticket or task title. A description is optional.');
-    if (detectPaste(title)) return reviewPrimaryPaste();
+    if (detectPaste(title) || hasTicketMatch(title)) return reviewPrimaryPaste();
     if (title.length > 200) throw new Error('Keep the title under 200 characters. Put longer details in Progress / note, or use paste options.');
     if (day().tasks.length >= 1000) throw new Error('Use up to 1,000 entries per day.');
     const task = validateTask(currentSingleTask());
@@ -362,22 +362,33 @@ function reviewIsCurrent() {
   const review = day().pasteReview, options = quickOptions();
   return review && review.source === day().quickDraft && review.mode === options.mode && review.headers === options.headers;
 }
+const reviewOptions = (options = {}) => ({ ...options, history: ticketHistory(state, activeShiftId) });
+function pastTicketMatches(row) {
+  return ticketHistory(state, activeShiftId).filter(item => ticketMatches([item.task], row).length);
+}
+function hasTicketMatch(title) {
+  return ticketMatches(day().tasks, { title }).length || pastTicketMatches({ title }).length;
+}
+const continuationChoice = (shiftId, taskId) => `continue:${JSON.stringify([shiftId, taskId])}`;
+const historyLabel = shift => [shift.date, shift.shiftName || 'Shift', shift.header.start].filter(Boolean).join(' · ');
 function syncReviewDecision(element, index, reset = false) {
-  const row = day().pasteReview.rows[index], matches = ticketMatches(day().tasks, row);
-  const signature = JSON.stringify(matches.map(task => task.id));
+  const row = day().pasteReview.rows[index], matches = ticketMatches(day().tasks, row), past = pastTicketMatches(row);
+  const any = matches.length + past.length;
+  const signature = JSON.stringify([matches.map(task => task.id), past.map(({ shift, task }) => [shift.id, task.id])]);
   if (row.action === 'update' && !matches.some(task => task.id === row.targetId)) { row.action = ''; row.targetId = ''; }
-  if (reset && signature !== element.dataset.matches && row.action !== 'skip') { row.action = matches.length ? '' : 'add'; row.targetId = ''; }
+  if (row.action === 'continue' && !past.some(({ shift, task }) => task.id === row.targetId && shift.id === row.sourceShiftId)) { row.action = ''; row.targetId = ''; row.sourceShiftId = ''; }
+  if (reset && signature !== element.dataset.matches && row.action !== 'skip') { row.action = any ? '' : 'add'; row.targetId = ''; row.sourceShiftId = ''; }
   element.dataset.matches = signature;
-  const choice = row.action === 'update' ? `update:${row.targetId}` : row.action;
-  element.querySelector('[data-field="action"]').innerHTML = `${matches.length || !row.action ? '<option value="">Choose how to save</option>' : ''}<option value="add">${matches.length ? 'Add separate work' : 'Add new update'}</option>${matches.map(task => `<option value="update:${esc(task.id)}">Update entry ${day().tasks.indexOf(task) + 1}: ${esc(displayText(taskName(task)).slice(0, 100))}</option>`).join('')}<option value="skip">Skip this update</option>`;
+  const choice = row.action === 'update' ? `update:${row.targetId}` : row.action === 'continue' ? continuationChoice(row.sourceShiftId, row.targetId) : row.action;
+  element.querySelector('[data-field="action"]').innerHTML = `${any || !row.action ? '<option value="">Choose how to save</option>' : ''}${matches.map(task => `<option value="update:${esc(task.id)}">Update this shift’s entry ${day().tasks.indexOf(task) + 1}: ${esc(displayText(taskName(task)).slice(0, 100))}</option>`).join('')}${past.map(({ shift, task }) => `<option value="${esc(continuationChoice(shift.id, task.id))}">${task.status === 'Completed' ? 'Reopen' : 'Continue'} from ${esc(historyLabel(shift))}: ${esc(displayText(taskName(task)).slice(0, 80))}</option>`).join('')}<option value="add">${any ? 'Add separate work' : 'Add new update'}</option><option value="skip">Skip this update</option>`;
   element.querySelector('[data-field="action"]').value = choice;
   element.querySelector('[data-field="include"]').checked = row.action !== 'skip';
-  element.querySelector('.review-match-options').hidden = !matches.length && !!row.action;
+  element.querySelector('.review-match-options').hidden = !any && !!row.action;
   element.querySelector('.review-details>summary').textContent = [row.category, row.area].filter(Boolean).join(' · ') || 'Category, row & links';
   element.classList.toggle('is-skipped', row.action === 'skip');
   element.querySelector('[data-field="title"]').required = row.action !== 'skip';
-  element.querySelector('.paste-match').textContent = matches.length ? `${matches.length === 1 ? 'Ticket already in today’s log.' : 'Several entries use this ticket.'} Updating replaces its title and progress; original request, quantities, and status stay as saved.` : row.action === 'skip' ? 'Skipped. Choose Add new update if this is separate work.' : '';
-  element.querySelector('.paste-current').textContent = matches.map(task => `Entry ${day().tasks.indexOf(task) + 1}: ${displayText(taskSummary(task)).slice(0, 350)}${taskSummary(task).length > 350 ? '…' : ''}`).join('\n\n');
+  element.querySelector('.paste-match').textContent = [matches.length ? 'This ticket is already on this shift. Updating replaces its title and progress; other saved details stay intact.' : '', past.length ? 'Found in earlier shifts. Continue keeps the original request and history, with only the progress you enter here. Earlier reports stay unchanged.' : '', !any && row.action === 'skip' ? 'Skipped. Choose Add new update if this is separate work.' : ''].filter(Boolean).join(' ');
+  element.querySelector('.paste-current').textContent = [...matches.map(task => `This shift · Entry ${day().tasks.indexOf(task) + 1}: ${displayText(taskSummary(task)).slice(0, 350)}`), ...past.map(({ shift, task }) => `${historyLabel(shift)} · ${task.status || 'No status'}${task.logged === false ? ' · Planned' : ''}\n${displayText(taskName(task))}\nLast progress: ${displayText(task.entryType === 'quick' ? task.summary : task.notes).slice(0, 350) || 'No progress recorded'}${task.description ? `\nOriginal request: ${displayText(task.description).slice(0, 250)}` : ''}`)].join('\n\n');
 }
 function renderPasteReview() {
   const review = day().pasteReview;
@@ -386,12 +397,12 @@ function renderPasteReview() {
   $('paste-title').textContent = `Review ${review.rows.length} ${review.rows.length === 1 ? 'update' : 'updates'}`;
   $('batch-fill').hidden = review.rows.length < 2;
   $('paste-shared-description').value = review.shared?.summary || ''; $('paste-shared-category').value = review.shared?.category || ''; $('paste-shared-area').value = review.shared?.area || '';
-  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Current saved entry</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
-  [...$('paste-list').children].forEach((element, index) => syncReviewDecision(element, index));
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Saved work &amp; latest progress</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
+  [...$('paste-list').children].forEach((element, index) => { syncReviewDecision(element, index); element.querySelector('.review-match-options details').open = !!pastTicketMatches(review.rows[index]).length; });
   updatePasteButton();
 }
 function updatePasteButton() {
-  const rows = day().pasteReview?.rows || [], count = rows.filter(row => ['add', 'update'].includes(row.action)).length;
+  const rows = day().pasteReview?.rows || [], count = rows.filter(row => ['add', 'update', 'continue'].includes(row.action)).length;
   const undecided = rows.some(row => !row.action), stale = !!rows.length && !reviewIsCurrent();
   $('paste-stale').hidden = !stale || composerMode !== 'paste';
   $('save-paste').disabled = !rows.length || undecided || stale;
@@ -402,7 +413,7 @@ function addQuickUpdates(event) {
   event.preventDefault();
   try {
     if (!reviewIsCurrent()) {
-      day().pasteReview = createPasteReview(day().tasks, $('quick-notes').value, quickOptions());
+      day().pasteReview = createPasteReview(day().tasks, $('quick-notes').value, reviewOptions(quickOptions()));
       $('paste-shared-description').value = ''; $('paste-shared-category').value = ''; $('paste-shared-area').value = ''; $('paste-fill-status').textContent = '';
       $('batch-fill').open = false;
     }
@@ -769,11 +780,12 @@ $('paste-list').addEventListener('input', event => {
   if (!element) return;
   const index = Number(element.dataset.reviewIndex), row = day().pasteReview.rows[index], field = event.target.dataset.field;
   if (field === 'include') {
-    row.action = event.target.checked ? ticketMatches(day().tasks, row).length ? '' : 'add' : 'skip';
-    row.targetId = '';
+    row.action = event.target.checked ? hasTicketMatch(row.title) ? '' : 'add' : 'skip';
+    row.targetId = ''; row.sourceShiftId = '';
   } else if (field === 'action') {
-    row.action = event.target.value.startsWith('update:') ? 'update' : event.target.value;
-    row.targetId = row.action === 'update' ? event.target.value.slice(7) : '';
+    row.action = event.target.value.startsWith('continue:') ? 'continue' : event.target.value.startsWith('update:') ? 'update' : event.target.value;
+    row.targetId = row.action === 'update' ? event.target.value.slice(7) : ''; row.sourceShiftId = '';
+    if (row.action === 'continue') [row.sourceShiftId, row.targetId] = JSON.parse(event.target.value.slice(9));
   } else if (['title', 'summary', 'category', 'area'].includes(field)) row[field] = event.target.value;
   syncReviewDecision(element, index, field === 'title');
   persist(); updatePasteButton();
@@ -791,8 +803,8 @@ $('paste-form').addEventListener('submit', event => {
     const rows = day().pasteReview.rows;
     if (!rows.length) return;
     if (rows.some(row => row.action === 'update' && inlineEdits.has(editKey(row.targetId)))) throw new Error('Save or cancel the inline edits for the matching ticket first.');
-    const tasks = applyPasteReview(day().tasks, rows, { logged: $('entry-logged').checked, status: $('entry-status').value });
-    const added = rows.filter(row => row.action === 'add').length, updated = rows.filter(row => row.action === 'update').length;
+    const tasks = applyPasteReview(day().tasks, rows, { logged: $('entry-logged').checked, status: $('entry-status').value, history: ticketHistory(state, activeShiftId) });
+    const added = rows.filter(row => ['add', 'continue'].includes(row.action)).length, updated = rows.filter(row => row.action === 'update').length;
     if (added || updated) replaceTasks(day(), tasks, 'Save pasted updates');
     if (added || updated) resetWorkFilters();
     day().quickDraft = ''; day().pasteReview = null;
@@ -1028,7 +1040,7 @@ $('work-csv-file').addEventListener('change', async event => {
     if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Save or clear your current pasted draft before importing a work CSV.');
     if (file.size > 12000) throw new Error('Import up to 12,000 characters at a time. Split larger work lists into smaller CSV files.');
     const source = await file.text();
-    const review = createPasteReview(day().tasks, source, { mode: 'csv', headers: true });
+    const review = createPasteReview(day().tasks, source, reviewOptions({ mode: 'csv', headers: true }));
     day().quickDraft = source; day().quickMode = 'csv'; day().quickTableHeaders = true; day().pasteReview = review;
     $('quick-notes').value = source; $('quick-mode').value = 'csv'; $('quick-table-headers').checked = true;
     composerMode = 'paste'; pasteReviewOpen = true; previewContext = { kind: 'review' };
@@ -1046,8 +1058,8 @@ $('entry-status').addEventListener('change', () => { day().entryStatus = $('entr
 function syncEntryIntent() { $('entry-intent-help').textContent = $('entry-logged').checked ? 'Included in the EOD report. Add a short result below when useful.' : 'Planned only. Log progress later to include it in the EOD report.'; }
 function reviewPrimaryPaste() {
   if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Finish the saved list first. Your current text stays saved as a draft.');
-  const source = $('update-title').value.trim(), options = detectPaste(source);
-  const review = createPasteReview(day().tasks, source, options);
+  const source = $('update-title').value.trim(), options = detectPaste(source) || { mode: 'single', headers: false };
+  const review = createPasteReview(day().tasks, source, reviewOptions(options));
   review.rows = fillPasteReview(review.rows, { summary: $('update-description').value, category: $('update-category').value, area: $('update-area').value });
   day().quickDraft = source; day().quickMode = options.mode; day().quickTableHeaders = options.headers; day().pasteReview = review;
   day().updateTitleDraft = ''; day().updateDescriptionDraft = ''; day().updateCategoryDraft = 'auto'; day().updateCategoryAuto = true; day().updateAreaDraft = '';
