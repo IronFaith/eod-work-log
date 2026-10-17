@@ -1,15 +1,16 @@
-import { setupPlanner } from './planner-ui.mjs?v=5.2';
-import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.2';
-import { loggedTasks } from './model.mjs?v=5.2';
-import { setupCrew } from './crew-ui.mjs?v=5.2';
-import { crewText } from './crew.mjs?v=5.2';
-import { workCsv } from './model.mjs?v=5.2';
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.2';
-import { buildReportPdf } from './pdf.mjs?v=5.2';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.2';
-import { previewDraft } from './preview.mjs?v=5.2';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.2';
-import { refreshFormatting, sourceField } from './editor.mjs?v=5.2';
+import { setupPlanner } from './planner-ui.mjs?v=5.3';
+import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.3';
+import { loggedTasks } from './model.mjs?v=5.3';
+import { setupCrew } from './crew-ui.mjs?v=5.3';
+import { crewText } from './crew.mjs?v=5.3';
+import { workCsv } from './model.mjs?v=5.3';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.3';
+import { buildReportPdf } from './pdf.mjs?v=5.3';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.3';
+import { previewDraft } from './preview.mjs?v=5.3';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.3';
+import { refreshFormatting, sourceField } from './editor.mjs?v=5.3';
+import { REPORT_LABELS, reportLabelsFrom, updateFields } from './model.mjs?v=5.3';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeShiftId = activeDate, activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -31,7 +32,7 @@ try {
 }
 const day = () => ensureDay(state, activeDate, activeShiftId);
 state.categories = categoryNames([...state.categories, ...Object.values(state.days).flatMap(value => value.tasks.map(task => task.category))]);
-const reportOptions = () => ({ detailed: $('report-detail').checked });
+const reportOptions = () => ({ detailed: $('report-detail').checked, reportLabels: state.reportLabels });
 const quickOptions = () => ({ mode: $('quick-mode').value, headers: $('quick-table-headers').checked });
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
 function toast(message) {
@@ -76,7 +77,7 @@ function summary() {
 function renderHeader() {
   $('report-date').value = activeDate;
   $('date-caption').textContent = activeTab === 'schedule' ? 'Plan the crew and work. Open a shift to log progress.' : dateLabel(activeDate);
-  const titles = { report: 'Your EOD report', history: 'Manage', shift: 'Shift & crew', crew: crewMode === 'library' ? 'Crew library' : 'Choose crew', templates: 'Presets & defaults', entry: 'Add work', schedule: 'Schedule', today: 'My shift' };
+  const titles = { report: 'Your EOD report', history: 'Manage', shift: 'Shift & crew', crew: crewMode === 'library' ? 'Crew library' : 'Choose crew', templates: 'Presets & defaults', entry: 'Add update', schedule: 'Schedule', today: 'My shift' };
   $('page-title').textContent = titles[activeTab] || 'My shift';
   $('day-eyebrow').textContent = activeTab === 'schedule' ? 'Your work week' : activeTab === 'history' ? 'Workspace tools' : 'EOD · Shift planner';
   document.querySelector('.date-control').hidden = !['today', 'schedule'].includes(activeTab);
@@ -133,6 +134,8 @@ function fillDay() {
   $('carryover').value = day().carryover;
   $('update-title').value = day().updateTitleDraft;
   $('update-description').value = day().updateDescriptionDraft;
+  $('update-details').open = !!day().updateDescriptionDraft.trim();
+  $('entry-options').open = !day().entryLogged || !!day().entryStatus || !!day().updateAreaDraft || !day().updateCategoryAuto;
   $('update-category').value = day().updateCategoryAuto ? '' : day().updateCategoryDraft;
   $('update-area').value = day().updateAreaDraft;
   updateTitleButton();
@@ -150,6 +153,7 @@ function syncComposer() {
   $('update-form').hidden = composerMode !== 'single';
   $('quick-form').hidden = composerMode !== 'paste' || reviewing;
   $('paste-review').hidden = composerMode !== 'paste' || !reviewing;
+  $('entry-single-options').hidden = composerMode !== 'single';
   $('paste-stale').hidden = composerMode !== 'paste' || !day().pasteReview?.rows.length || reviewIsCurrent();
   document.querySelectorAll('[data-composer]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.composer === composerMode)));
   $('single-draft-badge').hidden = !day().updateTitleDraft.trim() && !day().updateDescriptionDraft.trim();
@@ -180,9 +184,9 @@ function renderTasks() {
     const statusClass = task.logged === false ? 'planned' : task.status === 'Completed' ? 'completed' : task.status === 'Blocked' ? 'blocked' : '';
     const context = [task.category || 'Uncategorized', task.area, task.ticketId ? `Ticket ${task.ticketId}` : ''].filter(Boolean).join(' · ');
     const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(displayText(taskName(task)))}"${selectedTasks.has(task.id) ? ' checked' : ''}></label>`;
-    const actions = `<div class="task-actions"><button class="text-button" data-action="history" data-id="${esc(task.id)}">History / continue</button>${task.entryType === 'quick' ? `<button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button" data-action="edit" data-id="${esc(task.id)}" aria-label="Edit entry ${number}">Edit here</button>${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
-    return `<article class="task-card compact-task ${statusClass}"><div class="work-list-row">${selection}<button class="work-title" data-action="expand" data-id="${esc(task.id)}" aria-expanded="${expandedTasks.has(task.id)}" aria-label="View entry ${number}: ${esc(displayText(taskName(task)))}">${esc(displayText(taskName(task)))}</button><span class="work-category" data-label="Category">${esc(task.category || 'Uncategorized')}</span><span class="work-area" data-label="Row / area">${esc(task.area || '—')}</span><span class="work-status" data-label="Status">${esc(task.logged === false ? 'Planned' : task.status || 'Logged')}</span><button class="text-button" data-action="${task.logged === false ? 'progress' : 'edit'}" data-id="${esc(task.id)}" aria-label="${task.logged === false ? 'Log progress for' : 'Edit'} entry ${number}">${task.logged === false ? 'Log progress' : 'Edit'}</button></div>${draft ? inlineEditor(task, draft, number) : expandedTasks.has(task.id) ? `<div class="task-content"><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : '<p class="small muted">No description added.</p>'}</div>${actions}` : ''}</article>`;
-  }).join('')}`).join('') || `<div class="empty-state"><p>${tasks.length ? 'No entries match. Clear the filters to see all work.' : 'Your work will appear here. Use Add work to get started.'}</p></div>`;
+    const actions = `<div class="task-actions"><button class="text-button" data-action="history" data-id="${esc(task.id)}">History / continue</button>${task.entryType === 'quick' ? `<button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
+    return `<article class="task-card compact-task ${statusClass}"><div class="work-list-row">${selection}<button class="work-title" data-action="expand" data-id="${esc(task.id)}" aria-expanded="${expandedTasks.has(task.id)}" aria-label="View entry ${number}: ${esc(displayText(taskName(task)))}">${esc(displayText(taskName(task)))}</button><span class="work-category" data-label="Category">${esc(task.category || 'Uncategorized')}</span><span class="work-area" data-label="Row / area">${esc(task.area || '—')}</span><span class="work-status" data-label="Status">${esc(task.logged === false ? 'Planned' : task.status || 'Logged')}</span><button class="text-button" data-action="${task.logged === false ? 'progress' : 'edit'}" data-id="${esc(task.id)}" aria-label="${task.logged === false ? 'Log progress for' : 'Edit'} entry ${number}">${task.logged === false ? 'Log update' : 'Edit update'}</button></div>${draft ? inlineEditor(task, draft, number) : expandedTasks.has(task.id) ? `<div class="task-content"><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : '<p class="small muted">No description added.</p>'}</div>${actions}` : ''}</article>`;
+  }).join('')}`).join('') || `<div class="empty-state"><p>${tasks.length ? 'No entries match. Clear the filters to see all work.' : 'Your work will appear here. Use Add update to get started.'}</p></div>`;
   $('undo-log').disabled = !day().undo;
   $('undo-log').title = day().undo ? `Undo: ${day().undo.label}` : 'No log change to undo';
   updateSelection();
@@ -214,14 +218,14 @@ function renderCounts() {
   $('counts-breakdown').innerHTML = counts.rows.length ? `<table><thead><tr><th>${esc(counts.labels[0])}</th><th>Entries</th></tr></thead><tbody>${counts.rows.map(([label, count]) => `<tr><td>${esc(label)}</td><td>${count}</td></tr>`).join('')}</tbody></table>` : '<p class="small muted">Save an update to start counting.</p>';
 }
 function currentSingleTask() {
-  const title = $('update-title').value.trim(), summary = $('update-description').value.trim();
+  const { title, summary } = updateFields($('update-title').value, $('update-description').value);
   const category = day().updateCategoryAuto ? suggestCategory(`${title}\n${summary}`) : $('update-category').value;
   return { ...nextTask(), entryType: 'quick', title, summary, category, area: $('update-area').value.trim(), status: $('entry-status').value, logged: $('entry-logged').checked };
 }
 function currentInlineTask(id) {
   const original = day().tasks.find(task => task.id === id), draft = inlineEdits.get(editKey(id));
   if (!original || !draft) throw new Error('This entry is no longer available.');
-  return { ...original, title: draft.title.trim(), category: draft.category, area: draft.area.trim(), status: draft.status, logged: draft.logged, ...(original.entryType === 'quick' ? { summary: draft.progress.trim() } : { notes: draft.progress.trim() }) };
+  return { ...original, category: draft.category, area: draft.area.trim(), status: draft.status, logged: draft.logged, ...(original.entryType === 'quick' ? updateFields(draft.title, draft.progress) : { title: draft.title.trim(), notes: draft.progress.trim() }) };
 }
 function renderLivePreview() {
   refreshFormatting();
@@ -244,39 +248,41 @@ function renderLivePreview() {
   }
   livePreview.hidden = !state.previewOpen || kind === 'log' || (!['entry', 'today'].includes(activeTab) && kind !== 'task');
   $('toggle-preview').setAttribute('aria-pressed', String(state.previewOpen));
-  $('toggle-preview').textContent = state.previewOpen ? 'Hide live report preview' : 'Show live report preview';
+  $('toggle-preview').textContent = state.previewOpen ? 'Hide preview' : 'Show preview';
   document.body.classList.toggle('preview-open', state.previewOpen);
   const detailed = reportOptions().detailed;
   livePreview.querySelectorAll('[data-preview-format]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.previewFormat === 'detailed') === detailed)));
   $('live-preview-table').classList.toggle('preview-detailed', detailed);
+  $('live-preview-section').textContent = state.reportLabels.section;
   $('live-preview-state').textContent = kind === 'log' ? 'In log' : 'Not saved';
-  $('live-preview-help').textContent = kind === 'log' ? 'Your logged production tables. Choose a form or Edit here to preview a change.' : 'Preview only. Use the form’s Save or Add button to include these changes in your log.';
-  let result, notice = '', context = kind === 'log' ? 'This day’s logged entries' : kind === 'single' ? 'One update · as it will appear in the report' : kind === 'inline' ? 'Editing an existing entry' : kind === 'task' ? `${entryType() === 'field' ? 'Row / field work' : entryType() === 'ticket' ? 'Ticket' : 'General work'} · current form` : 'Pasted batch · included updates';
+  $('live-preview-help').textContent = kind === 'log' ? 'Choose Edit update to preview a change.' : 'Preview only · save your update to keep it.';
+  let result, notice = '', context = kind === 'log' ? 'This shift’s logged entries' : kind === 'single' ? 'Your update in the report' : kind === 'inline' ? 'Editing your update' : kind === 'task' ? `${entryType() === 'field' ? 'Row / field work' : entryType() === 'ticket' ? 'Ticket' : 'General work'} · current form` : 'Pasted batch · included updates';
   try {
     if (kind === 'log') result = { tasks: day().tasks, allTasks: day().tasks };
     else if (kind === 'single') {
       const source = $('update-title').value, options = detectPaste(source) || (hasTicketMatch(source) ? { mode: 'single', headers: false } : null);
       if (options) {
-        const rows = fillPasteReview(createPasteReview(day().tasks, source, reviewOptions(options)).rows, { summary: $('update-description').value, category: $('update-category').value, area: $('update-area').value });
+        const rows = primaryReviewRows(source, options);
         result = previewDraft(day().tasks, { rows, logged: $('entry-logged').checked, status: $('entry-status').value, history: ticketHistory(state, activeShiftId) });
         context = 'Pasted items · review before saving';
-        if (result.pending) notice = `${result.pending} matching tickets need a choice in Review.`;
+        if (result.pending) notice = 'Your draft is shown below. Choose where to save this update in Review; saved work is unchanged.';
       } else result = previewDraft(day().tasks, { task: source.trim() || $('update-description').value.trim() ? currentSingleTask() : null });
-      if (!$('update-title').value.trim() && result.tasks.length) notice = 'Add a short title before saving this update.';
+      if (!$('update-title').value.trim() && result.tasks.length) notice = 'Enter an update above before saving.';
     } else if (kind === 'task') result = previewDraft(day().tasks, { task: currentDetailedTask(), editingId: editingTask });
     else if (kind === 'inline') result = previewDraft(day().tasks, { task: currentInlineTask(id), editingId: id });
     else {
       if (kind === 'review' && !reviewIsCurrent()) throw new Error('Your paste changed. Refresh the review before previewing those choices.');
       const rows = reviewIsCurrent() ? day().pasteReview.rows : createPasteReview(day().tasks, $('quick-notes').value, reviewOptions(quickOptions())).rows;
       result = previewDraft(day().tasks, { rows, logged: $('entry-logged').checked, status: $('entry-status').value, history: ticketHistory(state, activeShiftId) });
-      notice = [result.pending ? `${result.pending} matching ${result.pending === 1 ? 'ticket needs' : 'tickets need'} a Save as choice in Review before appearing here.` : '', result.skipped ? `${result.skipped} skipped ${result.skipped === 1 ? 'update is' : 'updates are'} excluded.` : ''].filter(Boolean).join(' ');
+      notice = [result.pending ? `${result.pending} matching ${result.pending === 1 ? 'ticket needs' : 'tickets need'} a Save as choice. Your proposed text is shown; saved work is unchanged.` : '', result.skipped ? `${result.skipped} skipped ${result.skipped === 1 ? 'update is' : 'updates are'} excluded.` : ''].filter(Boolean).join(' ');
     }
     const planned = result.tasks.filter(task => task.logged === false).length;
-    result.tasks = result.tasks.filter(task => task.logged !== false); result.allTasks = result.allTasks.filter(task => task.logged !== false);
-    if (planned || ['paste', 'review'].includes(kind) && !$('entry-logged').checked) { notice = 'Planned work stays out of the report until you log progress.'; if (['paste', 'review'].includes(kind)) result.tasks = []; }
+    result.allTasks = result.allTasks.filter(task => task.logged !== false);
+    if (planned || ['paste', 'review'].includes(kind) && !$('entry-logged').checked) notice = `Planned preview: this is how it will look once logged. Planned work stays out of the report. ${notice}`.trim();
+    $('live-preview-state').textContent = planned ? 'Planned draft' : result.pending ? 'Needs choice' : 'Not saved';
     context += ` · ${result.tasks.length} ${result.tasks.length === 1 ? 'entry' : 'entries'}`;
-    if (result.tasks.length) context += `\n${kind === 'log' ? 'Saved totals' : 'Totals after saving included updates'}: ${workCounts(result.allTasks).summary}.`;
-    $('live-preview-table').innerHTML = result.tasks.length ? renderProductionTables(result.tasks, { detailed, columnTasks: result.allTasks }) : '<p class="preview-empty">Type a title, fill in field work, or paste updates to see the report table here.</p>';
+    if (result.tasks.length && !result.pending && !planned) context += `\n${kind === 'log' ? 'Saved totals' : 'Totals after saving'}: ${workCounts(result.allTasks).summary}.`;
+    $('live-preview-table').innerHTML = result.tasks.length ? renderProductionTables(result.tasks, { ...reportOptions(), columnTasks: [...result.allTasks, ...result.tasks] }) : '<p class="preview-empty">Start your update above. Your report row will appear here as you type.</p>';
     if (['paste', 'review'].includes(kind) && !result.tasks.length && (result.pending || result.skipped)) $('live-preview-table').innerHTML = '<p class="preview-empty">No included updates to preview yet.</p>';
   } catch (error) {
     notice = error.message;
@@ -287,8 +293,13 @@ function renderLivePreview() {
   $('live-preview-notice').hidden = !notice;
 }
 function inlineEditor(task, draft, number) {
-  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit entry ${number}"><div class="fields two"><label class="full">Title / ticket<input data-linkable data-inline-field="title" maxlength="200" value="${esc(draft.title)}"${task.title || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}></label><label class="full">${task.entryType === 'quick' && !task.title ? 'Update text (add a title above to separate it)' : 'Today’s progress / description'} <span class="optional">optional</span><textarea data-linkable data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label><label>Category${categoryField(draft.category, 'data-inline-field="category"')}</label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label><label>Status<select data-inline-field="status">${task.entryType === 'quick' ? '<option value="">No status</option>' : ''}${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label><label class="check-label full progress-label"><input type="checkbox" data-inline-field="logged"${draft.logged ? ' checked' : ''}>Log work in this shift’s report</label></div><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save changes</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
+  return `<form class="inline-editor" data-edit-id="${esc(task.id)}" aria-label="Edit update ${number}">
+    <label>Update<textarea data-linkable data-inline-field="title" rows="2" maxlength="${task.entryType === 'quick' ? 12000 : 200}"${task.entryType === 'quick' || ['ticket', 'general'].includes(task.entryType) ? ' required' : ''}>${esc(draft.title)}</textarea></label>
+    <details class="entry-details"${draft.progress ? ' open' : ''}><summary>Add details <span class="optional">optional</span></summary><label>Details<textarea data-linkable data-inline-field="progress" rows="3" maxlength="12000">${esc(draft.progress)}</textarea></label></details>
+    <details class="entry-options"><summary>More options <span class="optional">category, location &amp; status</span></summary><div class="fields two"><label>Category${categoryField(draft.category, 'data-inline-field="category"')}</label><label>Row / area <span class="optional">optional</span><input data-inline-field="area" maxlength="200" value="${esc(draft.area)}"></label><label>Status<select data-inline-field="status">${task.entryType === 'quick' ? '<option value="">No status</option>' : ''}${STATUSES.map(status => `<option${status === draft.status ? ' selected' : ''}>${status}</option>`).join('')}</select></label><label class="check-label full progress-label"><input type="checkbox" data-inline-field="logged"${draft.logged ? ' checked' : ''}>Include in this shift’s report</label></div></details>
+    <button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button><p class="inline-error small danger-text" role="alert" hidden></p><div class="copy-actions"><button class="button primary" type="submit">Save update</button><button class="button secondary" type="button" data-action="cancel-edit" data-id="${esc(task.id)}">Cancel</button><span class="small muted">Ctrl/Cmd+Enter to save</span></div></form>`;
 }
+
 function updateSelection() {
   for (const id of selectedTasks) if (!day().tasks.some(task => task.id === id)) selectedTasks.delete(id);
   const count = selectedTasks.size;
@@ -303,7 +314,8 @@ function updateSelection() {
 function updateTitleButton() {
   syncComposer();
   $('save-update').disabled = !$('update-title').value.trim();
-  $('save-update').textContent = detectPaste($('update-title').value) ? 'Review pasted items' : hasTicketMatch($('update-title').value) ? 'Review existing ticket' : $('entry-logged').checked ? 'Add to shift log' : 'Add planned work';
+  $('save-update').textContent = detectPaste($('update-title').value) ? 'Review pasted items' : hasTicketMatch($('update-title').value) ? 'Review existing ticket' : $('entry-logged').checked ? 'Save update' : 'Save planned update';
+  $('split-updates').hidden = !/\S[^\n]*\n[\s\S]*\S/.test($('update-title').value.trim()) || !!detectPaste($('update-title').value);
   const suggestion = suggestCategory(`${$('update-title').value}\n${$('update-description').value}`);
   $('update-category').placeholder = day().updateCategoryAuto && suggestion ? `Suggested: ${suggestion}` : 'Choose or type a category';
   $('update-error').hidden = true;
@@ -312,9 +324,8 @@ function addTitledUpdate(event) {
   event.preventDefault();
   try {
     const title = $('update-title').value.trim();
-    if (!title) throw new Error('Enter a ticket or task title. A description is optional.');
+    if (!title) throw new Error('Enter an update. Details are optional.');
     if (detectPaste(title) || hasTicketMatch(title)) return reviewPrimaryPaste();
-    if (title.length > 200) throw new Error('Keep the title under 200 characters. Put longer details in Progress / note, or use paste options.');
     if (day().tasks.length >= 1000) throw new Error('Use up to 1,000 entries per day.');
     const task = validateTask(currentSingleTask());
     replaceTasks(day(), [...day().tasks, task], 'Add update');
@@ -324,6 +335,7 @@ function addTitledUpdate(event) {
     day().updateCategoryDraft = 'auto'; day().updateCategoryAuto = true; day().updateAreaDraft = '';
     const saved = persist();
     $('update-form').reset();
+    $('update-details').open = false;
     $('entry-status').value = day().entryStatus = '';
     previewContext = { kind: 'log' };
     updateTitleButton(); renderTasks();
@@ -397,7 +409,7 @@ function renderPasteReview() {
   $('paste-title').textContent = `Review ${review.rows.length} ${review.rows.length === 1 ? 'update' : 'updates'}`;
   $('batch-fill').hidden = review.rows.length < 2;
   $('paste-shared-description').value = review.shared?.summary || ''; $('paste-shared-category').value = review.shared?.category || ''; $('paste-shared-area').value = review.shared?.area || '';
-  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Title / ticket<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Description <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Saved work &amp; latest progress</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Update<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Details <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Saved work &amp; latest progress</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
   [...$('paste-list').children].forEach((element, index) => { syncReviewDecision(element, index); element.querySelector('.review-match-options details').open = !!pastTicketMatches(review.rows[index]).length; });
   updatePasteButton();
 }
@@ -445,7 +457,7 @@ function showTab(tab, scroll = true) {
   if (tab === 'report' && [...inlineEdits.keys()].some(key => key.startsWith(`${activeShiftId}:`))) {
     toast('Save or cancel the edits in your log before opening the report.');
     showTab('today', scroll);
-    $('task-list').querySelector('.inline-editor input')?.focus();
+    $('task-list').querySelector('.inline-editor [data-inline-field="title"]')?.focus();
     return;
   }
   if (tab === 'crew' && activeTab !== 'crew') crewMode = activeTab === 'history' ? 'library' : 'pick';
@@ -835,9 +847,9 @@ $('task-list').addEventListener('click', event => {
   if (button.dataset.action === 'history') return planner.openHistory(task);
   if (['edit', 'progress'].includes(button.dataset.action)) {
     previewContext = { kind: 'inline', id: task.id };
-    inlineEdits.set(editKey(task.id), { title: task.title, progress: task.entryType === 'quick' ? task.summary : task.notes, category: task.category || '', area: task.area, status: task.status, logged: button.dataset.action === 'progress' ? true : task.logged !== false });
+    inlineEdits.set(editKey(task.id), { title: task.title || (task.entryType === 'quick' ? task.summary : ''), progress: task.entryType === 'quick' ? task.title ? task.summary : '' : task.notes, category: task.category || '', area: task.area, status: task.status, logged: button.dataset.action === 'progress' ? true : task.logged !== false });
     renderTasks();
-    [...$('task-list').querySelectorAll('[data-edit-id]')].find(form => form.dataset.editId === task.id)?.querySelector('input').focus();
+    [...$('task-list').querySelectorAll('[data-edit-id]')].find(form => form.dataset.editId === task.id)?.querySelector('[data-inline-field="title"]').focus();
     return;
   }
   if (button.dataset.action === 'cancel-edit') { inlineEdits.delete(editKey(task.id)); renderTasks(); return; }
@@ -938,6 +950,7 @@ function previewContextFor(target) {
   if (target.closest('#paste-form')) return { kind: 'review' };
   if (target.closest('#quick-form')) return { kind: 'paste' };
   if (target.closest('#update-form')) return { kind: 'single' };
+  if (target.closest('#entry-options')) return { kind: composerMode === 'single' ? 'single' : pasteReviewOpen ? 'review' : 'paste' };
   return null;
 }
 for (const eventName of ['input', 'change', 'focusin']) document.addEventListener(eventName, event => {
@@ -1023,10 +1036,12 @@ $('link-form').addEventListener('submit', event => {
       if (start && !/\s/.test(field.value[start - 1])) link = (field.id === 'shift-crew' ? '\n' : ' ') + link;
       if (end < field.value.length && !/\s/.test(field.value[end])) link += ' ';
     }
-    if (field.maxLength >= 0 && field.value.length - (end - start) + link.length > field.maxLength) throw new Error('That link is too long for this field. Add it in the description or progress instead.');
+    if (field.maxLength >= 0 && field.value.length - (end - start) + link.length > field.maxLength) throw new Error('That link is too long for this field. Add it in Details instead.');
     field.setRangeText(link, start, end, 'end');
     field.dispatchEvent(new Event('input', { bubbles: true }));
-    $('link-dialog').close(); field.focus();
+    $('link-dialog').close();
+    const details = field.closest('details'); if (details) details.open = true;
+    field.focus();
   } catch (error) { $('link-error').textContent = error.message; $('link-error').hidden = false; }
 });
 const { renderRoster, renderShiftCrew } = setupCrew({ getState: () => state, day, persist, toast, showTab, downloadFile, isLibrary: () => activeTab === 'crew' && crewMode === 'library' });
@@ -1056,11 +1071,20 @@ $('toggle-preview').addEventListener('click', () => { state.previewOpen = !state
 $('entry-logged').addEventListener('change', () => { day().entryLogged = $('entry-logged').checked; persist(); syncEntryIntent(); updateTitleButton(); renderLivePreview(); });
 $('entry-status').addEventListener('change', () => { day().entryStatus = $('entry-status').value; persist(); renderLivePreview(); });
 function syncEntryIntent() { $('entry-intent-help').textContent = $('entry-logged').checked ? 'Included in the EOD report. Add a short result below when useful.' : 'Planned only. Log progress later to include it in the EOD report.'; }
-function reviewPrimaryPaste() {
+function primaryReviewRows(source, options) {
+  const rows = createPasteReview(day().tasks, source, reviewOptions(options)).rows;
+  const details = $('update-description').value.trim();
+  for (const row of rows) {
+    if (details) row.summary = [row.summary, details].filter(Boolean).join('\n');
+    if (row.summary.length > 12000) throw new Error('Keep each update and its details within 12,000 characters.');
+  }
+  return fillPasteReview(rows, { category: $('update-category').value, area: $('update-area').value });
+}
+function reviewPrimaryPaste(grouping) {
   if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Finish the saved list first. Your current text stays saved as a draft.');
-  const source = $('update-title').value.trim(), options = detectPaste(source) || { mode: 'single', headers: false };
+  const source = $('update-title').value.trim(), options = grouping || detectPaste(source) || { mode: 'single', headers: false };
   const review = createPasteReview(day().tasks, source, reviewOptions(options));
-  review.rows = fillPasteReview(review.rows, { summary: $('update-description').value, category: $('update-category').value, area: $('update-area').value });
+  review.rows = primaryReviewRows(source, options);
   day().quickDraft = source; day().quickMode = options.mode; day().quickTableHeaders = options.headers; day().pasteReview = review;
   day().updateTitleDraft = ''; day().updateDescriptionDraft = ''; day().updateCategoryDraft = 'auto'; day().updateCategoryAuto = true; day().updateAreaDraft = '';
   $('update-title').value = ''; $('update-description').value = ''; $('update-category').value = ''; $('update-area').value = '';
@@ -1069,6 +1093,28 @@ function reviewPrimaryPaste() {
   persist(); renderPasteReview(); updateQuickButton(); chooseComposer('paste');
 }
 $('entry-import').addEventListener('click', () => chooseComposer(composerMode === 'paste' ? 'single' : 'paste'));
+$('split-updates').addEventListener('click', () => {
+  try { reviewPrimaryPaste({ mode: 'lines', headers: false }); }
+  catch (error) { $('update-error').textContent = error.message; $('update-error').hidden = false; }
+});
+function fillReportLabels(labels) {
+  for (const key of Object.keys(REPORT_LABELS)) $(`label-${key}`).value = labels[key];
+}
+document.querySelectorAll('[data-edit-report-labels]').forEach(button => button.addEventListener('click', () => {
+  fillReportLabels(state.reportLabels); $('report-labels-error').hidden = true; $('report-labels-dialog').showModal();
+}));
+$('report-labels-dialog').querySelector('[data-close]').addEventListener('click', () => $('report-labels-dialog').close());
+$('reset-report-labels').addEventListener('click', () => fillReportLabels(REPORT_LABELS));
+$('report-labels-form').addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    state.reportLabels = reportLabelsFrom(Object.fromEntries(Object.keys(REPORT_LABELS).map(key => [key, $(`label-${key}`).value])));
+    const saved = persist(false); $('report-labels-dialog').close(); renderLivePreview();
+    if (activeTab === 'report') renderReportView();
+    toast(saved ? 'Report labels saved' : 'Labels changed — export a backup to keep them');
+  } catch (error) { $('report-labels-error').textContent = error.message; $('report-labels-error').hidden = false; }
+});
+
 $('manage-work-import').addEventListener('click', () => { showTab('entry'); chooseComposer('paste'); });
 $('shift-preset-name').setAttribute('list', 'preset-names');
 $('shift-preset-name').addEventListener('input', updatePresetHint);

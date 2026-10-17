@@ -23,7 +23,7 @@ test('multiple shifts preserve independent crews, drafts and tasks through migra
   original.header.crew = 'Example day crew'; original.updatedAt = '2026-10-02T12:00:00Z'; original.updateTitleDraft = 'TK421\nTK422';
   state.schema = 9;
   const restored = m.parseBackup(m.exportBackup(state));
-  assert.equal(restored.schema, 11);
+  assert.equal(restored.schema, 12);
   const night = createShift(restored, original.date, { name: 'Night' });
   night.header.crew = 'Example night crew'; night.entryLogged = false;
   night.tasks = m.applyPasteReview([], m.createPasteReview([], 'TK430 TK431', { mode: 'tickets' }).rows, { logged: false });
@@ -85,7 +85,8 @@ test('the unified entry detects ticket lists and spreadsheet paste and preserves
   assert.deepEqual(detectPaste('tk28493 tk83939 tk939393'), { mode: 'tickets', headers: false });
   assert.deepEqual(detectPaste('Title\tDescription\nTK420\tChecked link'), { mode: 'table', headers: true });
   assert.deepEqual(detectPaste('Title,Description\nTK420,Checked link'), { mode: 'csv', headers: true });
-  assert.deepEqual(detectPaste('Inspect rack\nLabel ends'), { mode: 'lines', headers: false });
+  assert.equal(detectPaste('Inspect rack\nLabel ends'), null);
+  assert.deepEqual(detectPaste('TK420 | Checked link\nTK421 | Waiting for cable'), { mode: 'tickets', headers: false });
   assert.equal(detectPaste('Restore rack connection'), null);
   const source = 'TK420 TK421', review = m.createPasteReview([], source, detectPaste(source));
   const rows = m.fillPasteReview(review.rows, { summary: 'Checked links', category: 'Custom category', area: 'Row A' });

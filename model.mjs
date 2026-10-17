@@ -1,5 +1,5 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.2';
-import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.2';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.3';
+import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.3';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
@@ -8,6 +8,18 @@ export const STATUSES = ['In progress', 'Completed', 'Blocked'];
 export const ENTRY_TYPES = ['field', 'ticket', 'general', 'quick'];
 export const QUICK_MODES = ['lines', 'single', 'blocks', 'table', 'tickets', 'csv'];
 export const COUNT_FIELDS = { category: 'Category', area: 'Row / area', status: 'Status' };
+export const REPORT_LABELS = { section: 'Work summary', update: 'Update', details: 'Details' };
+export function reportLabelsFrom(value = {}) {
+  if (!isObject(value)) throw new Error('Invalid report labels.');
+  return Object.fromEntries(Object.entries(REPORT_LABELS).map(([key, fallback]) => [key, textField(value[key], 60).trim() || fallback]));
+}
+export function updateFields(source, details = '') {
+  const text = textField(source).replace(/\r\n?/g, '\n').trim(), [first, ...rest] = text.split('\n');
+  const title = first.length <= 200 ? first : '';
+  const summary = [title ? rest.join('\n').trim() : text, textField(details).trim()].filter(Boolean).join('\n');
+  if (summary.length > 12000) throw new Error('Keep this update and its details within 12,000 characters.');
+  return { title, summary };
+}
 export const CATEGORIES = ['Pulling / installation', 'Dressing / bundling', 'Labeling / testing', 'Rework / troubleshooting', 'General / support'];
 export function categoryNames(names) {
   const unique = new Map();
@@ -107,7 +119,7 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 11, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], previewOpen: false, pastePreferences: null, teamsTarget: '', days: {} }; }
+export function newState() { return { schema: 12, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], previewOpen: true, reportLabels: { ...REPORT_LABELS }, pastePreferences: null, teamsTarget: '', days: {} }; }
 export function validShiftId(id, date) { return validDate(date) && (id === date || new RegExp(`^${date}~[a-zA-Z0-9-]{1,100}$`).test(id)); }
 export function ensureDay(state, date, id = date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
@@ -291,20 +303,21 @@ function clockLabel(value) {
   const [hours, minutes] = value.split(':').map(Number);
   return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
 }
-export function reportData(day, { detailed = false } = {}) {
+export function reportData(day, { detailed = false, reportLabels } = {}) {
   const dateLabel = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const heading = `${reportWarnings(day).length ? 'Draft EOD' : 'EOD'} — ${dateLabel}`;
   const header = [['Shift', [day.shiftName, shiftLabel(day.header)].filter(Boolean).join(' · ')], ['Location', day.header.location || 'Not recorded'], ['Supervisor', day.header.supervisor || 'Not recorded'], ...(day.header.lead.trim() ? [['Acting lead', day.header.lead.trim()]] : []), ['Crew', crewText(day) || 'Not recorded']];
   const tasks = loggedTasks(day);
-  const production = productionData(tasks, { detailed });
+  const production = productionData(tasks, { detailed, reportLabels });
   const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
   const counts = day.showCounts !== false && tasks.length ? workCounts(tasks, day.countBy) : null;
-  return { heading, header, ...production, counts, blockers, carryover: day.carryover.trim() };
+  return { heading, header, ...production, workHeading: reportLabelsFrom(reportLabels).section, counts, blockers, carryover: day.carryover.trim() };
 }
-function productionData(tasks, { detailed = false, columnTasks = tasks } = {}) {
+function productionData(tasks, { detailed = false, columnTasks = tasks, reportLabels } = {}) {
   const hasLocation = columnTasks.some(task => task.area);
   const hasStatus = columnTasks.some(task => task.status);
-  const labels = detailed ? ['Work / ticket', ...(hasLocation ? ['Row / location'] : []), 'Description / progress', 'Status'] : ['Production / update', ...(hasStatus ? ['Status'] : [])];
+  const names = reportLabelsFrom(reportLabels);
+  const labels = detailed ? [names.update, ...(hasLocation ? ['Row / location'] : []), names.details, 'Status'] : [names.update, ...(hasStatus ? ['Status'] : [])];
   const taskGroups = groupTasks(tasks).map(group => ({ ...group, rows: group.tasks.map(task => detailed ? [[taskName(task), task.ticketId ? `Ticket: ${task.ticketId}` : ''].filter(Boolean).join('\n'), ...(hasLocation ? [task.area || '—'] : []), taskDetails(task) || '—', task.status || '—'] : [taskSummary(task), ...(hasStatus ? [task.status || '—'] : [])]) }));
   const taskRows = taskGroups.flatMap(group => group.rows);
   return { labels, taskRows, taskGroups };
@@ -318,16 +331,15 @@ export function renderProductionTables(tasks, options = {}) {
   return taskGroups.map(group => `<h3 style="font-size:15px;margin-top:18px;">${escapeHTML(group.label)} · ${group.tasks.length} ${group.tasks.length === 1 ? 'entry' : 'entries'}</h3>\n${tableHTML(labels, group.rows)}`).join('');
 }
 export function renderReport(day, options = {}) {
-  const { heading, header, taskRows, taskGroups, counts, blockers, carryover } = reportData(day, options);
+  const { heading, header, labels, taskRows, taskGroups, workHeading, counts, blockers, carryover } = reportData(day, options);
   let index = 0;
-  const updates = taskGroups.map(group => `${group.label}\n${group.tasks.map(task => {
+  const updates = taskGroups.map(group => `${group.label}\n${group.rows.map(row => {
     index++;
-    if (!options.detailed || task.entryType === 'quick') return `${index}. ${taskSummary(task)}${task.status ? `\nStatus: ${task.status}` : ''}`;
-    return [`${index}. ${taskName(task)}`, task.ticketId ? `Ticket: ${task.ticketId}` : '', task.area ? `Location: ${task.area}` : '', taskDetails(task), `Status: ${task.status}`].filter(Boolean).join('\n');
+    return `${index}. ${row.map((value, column) => column && value === '—' ? '' : `${labels[column]}:${column && value.includes('\n') ? '\n' : ' '}${value}`).filter(Boolean).join('\n')}`;
   }).join('\n\n')}`);
   return {
-    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}${counts ? `<h2 style="font-size:17px;">Work counts</h2><p>${escapeHTML(counts.summary)}</p>${tableHTML(counts.labels, counts.rows)}` : ''}<h2 style="font-size:17px;">Production updates</h2>\n${taskRows.length ? renderProductionTables(loggedTasks(day), options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
-    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}${counts ? `\n\nWORK COUNTS\n${counts.summary}\nBy ${counts.labels[0].toLowerCase()} (logged entries):\n${counts.rows.map(([label, count]) => `${label}: ${count}`).join('\n')}` : ''}\n\nPRODUCTION UPDATES\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
+    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}${counts ? `<h2 style="font-size:17px;">Work counts</h2><p>${escapeHTML(counts.summary)}</p>${tableHTML(counts.labels, counts.rows)}` : ''}<h2 style="font-size:17px;">${escapeHTML(workHeading)}</h2>\n${taskRows.length ? renderProductionTables(loggedTasks(day), options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
+    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}${counts ? `\n\nWORK COUNTS\n${counts.summary}\nBy ${counts.labels[0].toLowerCase()} (logged entries):\n${counts.rows.map(([label, count]) => `${label}: ${count}`).join('\n')}` : ''}\n\n${workHeading.toUpperCase()}\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
   };
 }
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -397,10 +409,11 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
-  state.previewOpen = raw.previewOpen === true;
+  state.previewOpen = raw.schema < 12 || raw.previewOpen !== false;
+  state.reportLabels = reportLabelsFrom(raw.reportLabels);
   state.defaultShiftDuration = durationFrom(raw.defaultShiftDuration);
   state.members = membersFrom(raw.members);
   state.defaultCrewMembers = membersFrom(raw.defaultCrewMembers, 200);
@@ -446,5 +459,5 @@ export function mergeBackup(current, incoming) {
   for (const preset of [...(current.shiftPresets || []), ...(incoming.shiftPresets || [])]) if (!presets.has(preset.name.toLowerCase()) && ![...presets.values()].some(item => item.id === preset.id)) presets.set(preset.name.toLowerCase(), preset);
   if (presets.size > 50) throw new Error('The combined backup has more than 50 shift presets.');
   const currentDefaults = Object.values(current.defaults).some(Boolean);
-  return { schema: 11, previewOpen: current.previewOpen === true, defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
+  return { schema: 12, previewOpen: current.previewOpen !== false, reportLabels: reportLabelsFrom(Object.entries(REPORT_LABELS).some(([key, value]) => current.reportLabels?.[key] && current.reportLabels[key] !== value) ? current.reportLabels : incoming.reportLabels), defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
 }

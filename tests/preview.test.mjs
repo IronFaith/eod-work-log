@@ -27,8 +27,10 @@ test('batch preview respects grouping, saved ticket details, skipped rows and pe
   let preview = previewDraft(saved, { rows: review.rows });
   assert.equal(preview.pending, 1);
   assert.equal(preview.skipped, 1);
-  assert.equal(preview.tasks.length, 1);
-  assert.match(renderProductionTables(preview.tasks, { columnTasks: preview.allTasks }), /Status/);
+  assert.equal(preview.tasks.length, 2);
+  assert.equal(preview.allTasks.length, 2, 'undecided drafts do not inflate saved totals');
+  assert.match(renderProductionTables(preview.tasks, { columnTasks: preview.allTasks }), /New progress/);
+  assert.deepEqual(saved, before);
   Object.assign(review.rows[0], { action: 'update', targetId: original.id });
   preview = previewDraft(saved, { rows: review.rows });
   assert.equal(preview.tasks.length, 2);

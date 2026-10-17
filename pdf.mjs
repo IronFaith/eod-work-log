@@ -1,5 +1,5 @@
-import { reportData } from './model.mjs?v=5.2';
-import { linkParts } from './links.mjs?v=5.2';
+import { reportData } from './model.mjs?v=5.3';
+import { linkParts } from './links.mjs?v=5.3';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
@@ -79,7 +79,7 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
     doc.addFileToVFS(`NotoSans-${style}.ttf`, fonts[style]);
     doc.addFont(`NotoSans-${style}.ttf`, 'NotoSans', style === 'regular' ? 'normal' : 'bold');
   }
-  const { heading, header, labels, taskGroups, counts, blockers, carryover } = reportData(day, options);
+  const { heading, header, labels, taskGroups, workHeading, counts, blockers, carryover } = reportData(day, options);
   doc.setProperties({ title: heading, subject: 'Daily work report', creator: 'EOD Work Log' });
   doc.setFont('NotoSans', 'bold');
   doc.setTextColor(24, 58, 86);
@@ -94,22 +94,27 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
   };
   table({ ...base, startY: 31, head: [['Shift details', 'Information']], body: header, columnStyles: { 0: { cellWidth: 35, fontStyle: 'bold' } } });
   let y = doc.lastAutoTable.finalY + 11;
-  function section(title, options) {
-    if (y > doc.internal.pageSize.getHeight() - 48) { doc.addPage(); y = 25; }
+  function sectionHeading(title, space = 48) {
+    if (y > doc.internal.pageSize.getHeight() - space) { doc.addPage(); y = 25; }
     doc.setFont('NotoSans', 'bold'); doc.setFontSize(12); doc.setTextColor(24, 58, 86);
     const titleLines = doc.splitTextToSize(title, 178);
     if (y + titleLines.length * 5 > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); y = 25; }
     doc.text(titleLines, 16, y);
-    table({ ...base, startY: y + (titleLines.length - 1) * 5 + 4, ...options });
+    y += (titleLines.length - 1) * 5 + 4;
+  }
+  function section(title, options) {
+    sectionHeading(title);
+    table({ ...base, startY: y, ...options });
     y = doc.lastAutoTable.finalY + 11;
   }
   const hasLocation = labels.length === 4;
   if (counts) section('Work counts', { head: [counts.labels], body: [...counts.rows, ['Total logged entries', String(counts.entries)], ['Unique ticket IDs', String(counts.tickets)], ['Distinct rows / areas', String(counts.areas)]], columnStyles: { 1: { cellWidth: 32 } } });
+  if (taskGroups.length) { sectionHeading(workHeading, 64); y += 5; }
   for (const group of taskGroups) section(`${group.label} · ${group.tasks.length} ${group.tasks.length === 1 ? 'entry' : 'entries'}`, {
     head: [labels], body: group.rows,
     columnStyles: options.detailed ? (hasLocation ? { 0: { cellWidth: 39 }, 1: { cellWidth: 27 }, 3: { cellWidth: 25 } } : { 0: { cellWidth: 48 }, 2: { cellWidth: 25 } }) : (labels.length === 2 ? { 1: { cellWidth: 27 } } : {})
   });
-  if (!taskGroups.length) section('Production updates', { body: [['No tasks recorded.']] });
+  if (!taskGroups.length) section(workHeading, { body: [['No tasks recorded.']] });
   section('Blockers', { body: [[blockers]] });
   if (carryover) section('Carryover / next shift', { body: [[carryover]] });
   const pages = doc.getNumberOfPages();

@@ -2,6 +2,39 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, ensureDay, nextTask, quickTasks, taskName, taskDetails, reportData, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask, hasDayContent } from '../model.mjs';
 
+test('custom report labels survive backup and appear consistently in both report formats', () => {
+  const state = newState(), day = ensureDay(state, '2026-10-16');
+  state.reportLabels = { section: 'Shift results', update: 'Work item', details: 'Result & next step' };
+  day.tasks = [validateTask({ ...nextTask({ entryType: 'quick' }), title: 'TK420', summary: 'Link restored' })];
+  const restored = parseBackup(exportBackup(state));
+  assert.deepEqual(restored.reportLabels, state.reportLabels);
+  assert.deepEqual(mergeBackup(newState(), restored).reportLabels, state.reportLabels);
+  for (const detailed of [false, true]) {
+    const options = { detailed, reportLabels: restored.reportLabels };
+    assert.equal(reportData(day, options).labels[0], 'Work item');
+    const report = renderReport(day, options);
+    assert.match(report.html, /Shift results/);
+    assert.match(report.text, /SHIFT RESULTS/);
+    assert.match(report.text, /Work item: TK420/);
+    if (detailed) {
+      assert.ok(reportData(day, options).labels.includes('Result & next step'));
+      assert.match(report.text, /Result & next step: Link restored/);
+    }
+  }
+});
+
+test('old workspaces gain automatic preview and default labels without changing saved work', () => {
+  const old = newState(); old.schema = 11; old.previewOpen = false; delete old.reportLabels;
+  const day = ensureDay(old, '2026-10-15');
+  day.tasks = [validateTask({ ...nextTask({ entryType: 'quick' }), title: 'Original update' })];
+  const restored = parseBackup(exportBackup(old));
+  assert.equal(restored.previewOpen, true);
+  assert.deepEqual(restored.reportLabels, { section: 'Work summary', update: 'Update', details: 'Details' });
+  assert.deepEqual(restored.days[day.id].tasks, day.tasks);
+  restored.previewOpen = false;
+  assert.equal(parseBackup(exportBackup(restored)).previewOpen, false);
+});
+
 test('reports omit an empty acting lead while retaining the crew names', () => {
   const day = ensureDay(newState(), '2026-09-24');
   day.header.crew = 'Test technician A\nTest technician B';
@@ -31,7 +64,7 @@ test('a titled update can omit its description and retains both fields when prov
   for (const detailed of [false, true]) {
     const report = renderReport(restored, { detailed });
     assert.match(report.text, /INC-204 — Restore rack connection/);
-    assert.match(report.text, /Pull fiber — Row A\nPulled 4 bundles; 2 remaining\./);
+    assert.match(report.text, /Pull fiber — Row A\n(?:Details: )?Pulled 4 bundles; 2 remaining\./);
   }
 });
 
@@ -158,7 +191,7 @@ test('readable report output keeps ticket identity, request, and work performed 
   const day = ensureDay(newState(), '2026-09-24');
   day.tasks = [{ ...nextTask(), entryType: 'ticket', title: 'Inspect cross-connect', ticketId: 'REQ-008', description: 'Check the new connection', notes: 'Inspected and labeled both ends', status: 'Completed' }];
   const report = renderReport(day, { detailed: true });
-  assert.match(report.text, /1\. Inspect cross-connect/);
+  assert.match(report.text, /1\. Update: Inspect cross-connect/);
   assert.match(report.text, /\nTicket: REQ-008\n/);
   assert.match(report.text, /\nDescription: Check the new connection\n/);
   assert.match(report.text, /\nWork performed: Inspected and labeled both ends\n/);

@@ -3,7 +3,7 @@
 A small static website for recording daily work and preparing an end-of-day report for Teams.
 
 - **My shift:** a compact shift summary, selected crew, Add work, task list, and Report & PDF. **Filter & organize** opens search, custom categories, grouping, counts, and bulk editing only when there is work to organize. Click a task title for details, status actions, and **History / continue**.
-- **Add work:** type one title or paste a list in the same field. Multiple lines, ticket IDs, and spreadsheet rows open a review before saving. A short progress note is optional. Category, location, and status are under optional details; cable breakdowns remain available below. Live report preview is optional and remembers its setting. Unfinished text and reviewed batches remain available through **Resume draft**.
+- **Add update:** write a ticket, task title, or short result in one field, check the live preview, and save. Optional **Add details** expands a description. **More options** holds category, location, status, planned/report inclusion, import tools, and detailed quantities. Ordinary multiline notes remain one update (first line becomes the short title when possible); **Split lines into separate updates** is explicit. Recognized ticket lists and spreadsheet rows open review. Direct editing uses the same Update / Details layout. Unfinished drafts remain available through **Resume draft**.
 - **Schedule:** a weekly agenda for past and future shifts, showing crew, planned work, and logged entries. **Add shift** uses defaults or a saved preset. One shift per date is the simple starting point; **Add another shift** creates a separate crew, task list, and report for the same date.
 - **Edit shift & crew:** choose 8, 10, or 12 hours and a start time to fill the end time, including overnight shifts. Presets retain times, location, supervisor, optional lead, and crew. A blank acting lead is omitted from the report.
 - **Manage:** crew library, shift presets, CSV entry, all saved shifts, and JSON backups. Imports preserve existing shifts and add missing records.
@@ -14,7 +14,7 @@ Supporting screens show the selected shift and a consistent return button. Shift
 
 **Choose members** checks people onto the selected shift. **Manage → Crew library** edits reusable records only: there are no assignment checkboxes, and adding or importing members there does not select them onto a shift. Edits and removals retain existing crew snapshots. Return labels indicate whether you are going to My shift, Shift & crew, Report, or Manage.
 
-Report shows the preview alongside PDF, blockers, copy, and export controls on desktop; these stack on smaller screens. **Full details** sits beside the preview. **Copy for Teams** groups readable text, links, and alternative clipboard methods. **Export production table** contains the work CSV. Manage groups reusable setup separately from files and backups.
+Report shows the preview alongside PDF, blockers, copy, and export controls on desktop; these stack on smaller screens. **Full details** and **Edit labels** sit beside the preview. Rename the Work summary heading, Update column, and Details column; those labels are shared by the live preview, HTML/readable copies, and PDF. Labels apply across reports on this device and are included in backups. Standard CSV exchange headers remain unchanged. **Copy for Teams** groups readable text, links, and alternative clipboard methods. **Export work table** contains the work CSV. Manage groups reusable setup separately from files and backups.
 
 ## Planned work and task history
 
@@ -64,7 +64,7 @@ The PDF preserves table layout, embeds fonts, and numbers its pages. Compact rep
 
 **Copy table** uses native browser selection copying from the displayed report. This is a compatibility path for testing app-to-app paste; the browser must support the legacy copy command. **Select report** lets you use the device's native Copy action yourself. **Copy with links** writes both HTML with clickable labels and plain text with full URLs through the Async Clipboard API. **Copy readable text** copies numbered entries with line breaks and link destinations. These are separate methods; none promises that Teams will accept a table. A clipboard check in a desktop browser does not prove iPhone Teams behavior. Review every paste before sending.
 
-Version 5.2 reads schema 1–11 records and backups automatically, keeping the same storage key and website address. Reload to update; do not clear website data. Schema 10 adds separate shifts on the same date, task identity across shifts, planned/logged work, and the preview preference. Schema 11 preserves cross-shift continuation choices in unfinished paste reviews. Older versions cannot open schema 11 backups. The full structured round-trip format is JSON backup; CSV remains a portable table.
+Version 5.3 reads schema 1–12 records and backups automatically, keeping the same storage key and website address. Reload to update; do not clear website data. Schema 10 adds separate shifts on the same date, task identity across shifts, planned/logged work, and the preview preference. Schema 11 preserves cross-shift continuation choices in unfinished paste reviews. Schema 12 adds editable report labels and enables preview for older workspaces. A new explicit preview-hide choice is remembered. Older versions cannot open schema 12 backups. The full structured round-trip format is JSON backup; CSV remains a portable table.
 
 ## Format text while entering it
 
@@ -95,11 +95,11 @@ PDF links use readable, underlined labels with actual URI annotations, including
 
 ## Preview the report while entering work
 
-Choose **Show live report preview** in Add work when you want the table beside the form. The preference is saved. Preview follows single updates, pasted lists, reviewed batches, inline edits, and detailed entries. On wide desktop screens it stays beside the work area; on smaller screens it sits with the active form. Planned entries show an exclusion notice until you choose to log progress.
+Preview is on automatically in Add update. On mobile it sits just below your update and optional details; on wide desktops it stays beside the form. It follows single updates, pasted lists, reviewed batches, inline edits, and detailed entries. **More options → Hide preview** remembers your choice. Planned entries show a proposed row with an explicit notice; they stay out of the actual report until logged.
 
-The preview updates as you type, change grouping, choose categories, enter quantities, or complete cable breakdowns. It uses the same production-table renderer as Report. **Compact** and **Full details** also set the format for Report and PDF in the current session. Columns account for other entries already in the day’s report. Table content and columns match; the available width and PDF page layout can differ.
+The preview updates as you type, change grouping, choose categories, enter quantities, or complete cable breakdowns. It uses the same production-table renderer as Report. **Compact** and **Full details** also set the format for Report and PDF in the current session. Columns account for other entries already in the shift’s report. Table content and columns match; the available width and PDF page layout can differ.
 
-Unsaved forms are marked **Not saved**. Previewing does not add or change log entries. Batch previews exclude skipped rows, require a save choice for matching tickets, and show field errors when a draft cannot yet be previewed. After saving or canceling, Work shows the saved list. The full Report includes shift details and blockers.
+Unsaved forms are marked **Not saved**. Previewing does not add or change log entries. Batch previews exclude skipped rows and show proposed text for matching tickets with a Needs choice notice. Pending choices do not inflate projected counts or change saved work. Field errors remain visible. After saving or canceling, Work shows the saved list. The full Report includes shift details and blockers.
 
 ## Edit and organize the daily log
 

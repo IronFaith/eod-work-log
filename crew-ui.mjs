@@ -1,5 +1,5 @@
-import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.2';
-import { escapeHTML as esc, displayText } from './links.mjs?v=5.2';
+import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.3';
+import { escapeHTML as esc, displayText } from './links.mjs?v=5.3';
 
 export function setupCrew({ getState, day, persist, toast, showTab, downloadFile, isLibrary = () => false }) {
   const $ = id => document.getElementById(id);

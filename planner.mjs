@@ -1,4 +1,4 @@
-import { ensureDay, localDate, validDate, validateTask } from './model.mjs?v=5.2';
+import { ensureDay, localDate, validDate, validateTask, splitQuickNotes } from './model.mjs?v=5.3';
 
 // One latest snapshot per work item, only from shifts before the selected shift.
 export function ticketHistory(state, targetId) {
@@ -64,6 +64,8 @@ export function detectPaste(source) {
   if (ids.length > 1 && ids.every(id => /^(?:(?:TK|INC|REQ|RITM|SCTASK|TASK|CHG|SR|WO)-?\d+|[A-Z][A-Z0-9]{1,11}-\d+)$/i.test(id) && !/^(ROW|RACK|ROOM)-/i.test(id))) return { mode: 'tickets', headers: false };
   if (/\t/.test(text)) return { mode: 'table', headers: /^(title|ticket|work|task|description|category|area)\b/i.test(text) };
   if (/^(title|ticket|work|task),/i.test(text)) return { mode: 'csv', headers: true };
-  if (/\n/.test(text)) return { mode: 'lines', headers: false };
+  if (/\n/.test(text)) {
+    try { if (splitQuickNotes(text, { mode: 'tickets' }).length > 1) return { mode: 'tickets', headers: false }; } catch { /* Prose stays together unless explicitly split. */ }
+  }
   return null;
 }
