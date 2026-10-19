@@ -23,7 +23,7 @@ test('multiple shifts preserve independent crews, drafts and tasks through migra
   original.header.crew = 'Example day crew'; original.updatedAt = '2026-10-02T12:00:00Z'; original.updateTitleDraft = 'TK421\nTK422';
   state.schema = 9;
   const restored = m.parseBackup(m.exportBackup(state));
-  assert.equal(restored.schema, 12);
+  assert.equal(restored.schema, 13);
   const night = createShift(restored, original.date, { name: 'Night' });
   night.header.crew = 'Example night crew'; night.entryLogged = false;
   night.tasks = m.applyPasteReview([], m.createPasteReview([], 'TK430 TK431', { mode: 'tickets' }).rows, { logged: false });

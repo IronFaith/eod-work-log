@@ -1,5 +1,5 @@
-import { reportData } from './model.mjs?v=5.3';
-import { linkParts } from './links.mjs?v=5.3';
+import { reportData } from './model.mjs?v=5.4';
+import { linkParts } from './links.mjs?v=5.4';
 import fonts from './vendor/fonts.mjs?v=2';
 
 // Both the preview and PDF use reportData, so optional fields stay consistent.
@@ -79,7 +79,7 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
     doc.addFileToVFS(`NotoSans-${style}.ttf`, fonts[style]);
     doc.addFont(`NotoSans-${style}.ttf`, 'NotoSans', style === 'regular' ? 'normal' : 'bold');
   }
-  const { heading, header, labels, taskGroups, workHeading, counts, blockers, carryover } = reportData(day, options);
+  const { heading, header, labels, taskGroups, workHeading, reportTables, counts, blockers, carryover } = reportData(day, options);
   doc.setProperties({ title: heading, subject: 'Daily work report', creator: 'EOD Work Log' });
   doc.setFont('NotoSans', 'bold');
   doc.setTextColor(24, 58, 86);
@@ -114,7 +114,12 @@ export function buildReportPdf(day, libraries = {}, options = {}) {
     head: [labels], body: group.rows,
     columnStyles: options.detailed ? (hasLocation ? { 0: { cellWidth: 39 }, 1: { cellWidth: 27 }, 3: { cellWidth: 25 } } : { 0: { cellWidth: 48 }, 2: { cellWidth: 25 } }) : (labels.length === 2 ? { 1: { cellWidth: 27 } } : {})
   });
-  if (!taskGroups.length) section(workHeading, { body: [['No tasks recorded.']] });
+  if (!taskGroups.length && !reportTables.length) section(workHeading, { body: [['No tasks recorded.']] });
+  for (const extra of reportTables) {
+    const groups = [extra.headers.slice(0,5).map((_,i) => i)];
+    for (let start = 5; start < extra.headers.length; start += 4) groups.push([0, ...extra.headers.slice(start,start+4).map((_,i) => start+i)]);
+    groups.forEach((indices,part) => section(`${extra.title}${groups.length > 1 ? ` · part ${part+1} of ${groups.length}` : ''}`, { head: [indices.map(i => extra.headers[i])], body: extra.rows.map(row => indices.map(i => row[i])), styles: { ...base.styles, minCellWidth: 20 } }));
+  }
   section('Blockers', { body: [[blockers]] });
   if (carryover) section('Carryover / next shift', { body: [[carryover]] });
   const pages = doc.getNumberOfPages();

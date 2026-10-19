@@ -1,4 +1,4 @@
-import { ensureDay, localDate, validDate, validateTask, splitQuickNotes } from './model.mjs?v=5.3';
+import { ensureDay, localDate, validDate, validateTask, splitQuickNotes } from './model.mjs?v=5.4';
 
 // One latest snapshot per work item, only from shifts before the selected shift.
 export function ticketHistory(state, targetId) {
@@ -25,7 +25,7 @@ export function createShift(state, date, { name = '', presetId = '' } = {}) {
   if (presetId && !preset) throw new Error('Choose a saved shift preset.');
   if (Object.keys(state.days).length >= 5000) throw new Error('Keep up to 5,000 shifts in this planner.');
   const existing = state.days[date];
-  const occupied = existing && (existing.updatedAt || existing.tasks.length || existing.shiftName || existing.updateTitleDraft || existing.updateDescriptionDraft || existing.quickDraft || existing.pasteReview || existing.blockers || existing.carryover);
+  const occupied = existing && (existing.updatedAt || existing.tasks.length || existing.reportTables?.length || existing.shiftName || existing.updateTitleDraft || existing.updateDescriptionDraft || existing.quickDraft || existing.pasteReview || existing.blockers || existing.carryover);
   const id = occupied ? `${date}~${crypto.randomUUID()}` : date;
   const shift = ensureDay(state, date, id);
   shift.shiftName = name.trim();

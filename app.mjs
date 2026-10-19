@@ -1,16 +1,18 @@
-import { setupPlanner } from './planner-ui.mjs?v=5.3';
-import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.3';
-import { loggedTasks } from './model.mjs?v=5.3';
-import { setupCrew } from './crew-ui.mjs?v=5.3';
-import { crewText } from './crew.mjs?v=5.3';
-import { workCsv } from './model.mjs?v=5.3';
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.3';
-import { buildReportPdf } from './pdf.mjs?v=5.3';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.3';
-import { previewDraft } from './preview.mjs?v=5.3';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.3';
-import { refreshFormatting, sourceField } from './editor.mjs?v=5.3';
-import { REPORT_LABELS, reportLabelsFrom, updateFields } from './model.mjs?v=5.3';
+import { setupTableImport } from './table-ui.mjs?v=5.4';
+import { mappedTaskCsv } from './table-import.mjs?v=5.4';
+import { setupPlanner } from './planner-ui.mjs?v=5.4';
+import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.4';
+import { loggedTasks } from './model.mjs?v=5.4';
+import { setupCrew } from './crew-ui.mjs?v=5.4';
+import { crewText } from './crew.mjs?v=5.4';
+import { workCsv } from './model.mjs?v=5.4';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.4';
+import { buildReportPdf } from './pdf.mjs?v=5.4';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.4';
+import { previewDraft } from './preview.mjs?v=5.4';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.4';
+import { refreshFormatting, sourceField } from './editor.mjs?v=5.4';
+import { REPORT_LABELS, reportLabelsFrom, updateFields } from './model.mjs?v=5.4';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeShiftId = activeDate, activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -409,7 +411,7 @@ function renderPasteReview() {
   $('paste-title').textContent = `Review ${review.rows.length} ${review.rows.length === 1 ? 'update' : 'updates'}`;
   $('batch-fill').hidden = review.rows.length < 2;
   $('paste-shared-description').value = review.shared?.summary || ''; $('paste-shared-category').value = review.shared?.category || ''; $('paste-shared-area').value = review.shared?.area || '';
-  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Update<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Details <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button></div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Saved work &amp; latest progress</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
+  $('paste-list').innerHTML = review.rows.map((row, index) => `<div class="paste-entry" data-review-index="${index}"><div class="review-entry-top"><h4>Update ${index + 1}</h4><label class="check-label"><input type="checkbox" data-field="include" aria-label="Include update ${index + 1}">Include</label></div><div class="review-primary"><label>Update<input data-linkable data-field="title" aria-label="Update ${index + 1} title" maxlength="200" value="${esc(row.title)}"></label><label>Details <span class="optional">optional</span><textarea data-linkable data-field="summary" aria-label="Update ${index + 1} description" rows="1" maxlength="12000">${esc(row.summary)}</textarea></label></div><details class="review-details"><summary>Category / row</summary><div class="review-meta"><label>Category${categoryField(row.category, `data-field="category" aria-label="Update ${index + 1} category"`)}</label><label>Row / area <span class="optional">optional</span><input data-field="area" aria-label="Update ${index + 1} row / area" maxlength="200" value="${esc(row.area || '')}"></label><button class="text-button link-tool" type="button" data-insert-link>Insert link / person</button>${row.status !== undefined ? `<label>Status<select data-field="status"><option value="">No imported status</option>${STATUSES.map(status => `<option${row.status === status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>` : ''}</div></details><div class="review-match-options"><p class="paste-match small"></p><details><summary>Saved work &amp; latest progress</summary><p class="paste-current small muted"></p></details><label>Save as<select data-field="action" aria-label="Update ${index + 1} action"></select></label></div></div>`).join('');
   [...$('paste-list').children].forEach((element, index) => { syncReviewDecision(element, index); element.querySelector('.review-match-options details').open = !!pastTicketMatches(review.rows[index]).length; });
   updatePasteButton();
 }
@@ -437,11 +439,12 @@ function addQuickUpdates(event) {
   } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
 }
 function renderReportView() {
+  tableImporter.renderReportTables();
   const warnings = reportWarnings(day());
   $('report-checks').hidden = !warnings.length;
   $('report-warnings').innerHTML = `<strong>A few details still need your review</strong><ul>${warnings.map(warning => `<li>${esc(warning)}</li>`).join('')}</ul><p class="small">Your PDF is marked Draft until these are filled in.</p>`;
   $('pdf-filename').textContent = reportFilename();
-  $('pdf-summary').textContent = `${loggedTasks(day()).length} ${loggedTasks(day()).length === 1 ? 'update' : 'updates'} · ${reportOptions().detailed ? 'Full details' : 'Compact report'}`;
+  $('pdf-summary').textContent = `${loggedTasks(day()).length} ${loggedTasks(day()).length === 1 ? 'update' : 'updates'} · ${reportOptions().detailed ? 'Full details' : 'Compact report'}${day().reportTables?.filter(table => table.include).length ? ` · ${day().reportTables.filter(table => table.include).length} additional tables` : ''}`;
   $('pdf-readiness').textContent = warnings.length ? 'Draft' : 'Ready';
   $('pdf-readiness').className = `status ${warnings.length ? 'blocked' : 'completed'}`;
   $('report-preview').innerHTML = renderReport(day(), reportOptions()).html;
@@ -798,7 +801,7 @@ $('paste-list').addEventListener('input', event => {
     row.action = event.target.value.startsWith('continue:') ? 'continue' : event.target.value.startsWith('update:') ? 'update' : event.target.value;
     row.targetId = row.action === 'update' ? event.target.value.slice(7) : ''; row.sourceShiftId = '';
     if (row.action === 'continue') [row.sourceShiftId, row.targetId] = JSON.parse(event.target.value.slice(9));
-  } else if (['title', 'summary', 'category', 'area'].includes(field)) row[field] = event.target.value;
+  } else if (['title', 'summary', 'category', 'area', 'status'].includes(field)) row[field] = event.target.value;
   syncReviewDecision(element, index, field === 'title');
   persist(); updatePasteButton();
 });
@@ -1044,7 +1047,7 @@ $('link-form').addEventListener('submit', event => {
     field.focus();
   } catch (error) { $('link-error').textContent = error.message; $('link-error').hidden = false; }
 });
-const { renderRoster, renderShiftCrew } = setupCrew({ getState: () => state, day, persist, toast, showTab, downloadFile, isLibrary: () => activeTab === 'crew' && crewMode === 'library' });
+const { renderRoster, renderShiftCrew, reviewMappedMembers } = setupCrew({ getState: () => state, day, persist, toast, showTab, downloadFile, isLibrary: () => activeTab === 'crew' && crewMode === 'library' });
 $('manage-crew-library').addEventListener('click', () => { crewMode = 'library'; showTab('crew'); });
 $('export-work-csv').addEventListener('click', () => {
   downloadFile(workCsv(loggedTasks(day())), reportFilename().replace(/^EOD-/, 'work-').replace(/\.pdf$/, '.csv'), 'text/csv;charset=utf-8');
@@ -1115,7 +1118,7 @@ $('report-labels-form').addEventListener('submit', event => {
   } catch (error) { $('report-labels-error').textContent = error.message; $('report-labels-error').hidden = false; }
 });
 
-$('manage-work-import').addEventListener('click', () => { showTab('entry'); chooseComposer('paste'); });
+
 $('shift-preset-name').setAttribute('list', 'preset-names');
 $('shift-preset-name').addEventListener('input', updatePresetHint);
 $('preset-library').addEventListener('click', event => {
@@ -1123,4 +1126,19 @@ $('preset-library').addEventListener('click', event => {
   $('shift-preset').value = button.dataset.usePreset; $('apply-shift-preset').disabled = false;
   $('apply-shift-preset').click(); showTab('shift');
 });
+const tableImporter = setupTableImport({ getState: () => state, day, getActiveId: () => activeShiftId, persist, toast, downloadFile,
+  acceptTasks(rows) {
+    if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Finish the saved list in Add update first. Your table stays here until then.');
+    const source = mappedTaskCsv(rows);
+    if (source.length > 12000) throw new Error('This task list exceeds 12,000 characters. Select fewer rows and import the rest in another batch.');
+    const review = createPasteReview(day().tasks, source, reviewOptions({ mode: 'csv', headers: true }));
+    day().quickDraft = source; day().quickMode = 'csv'; day().quickTableHeaders = true; day().pasteReview = review;
+    $('quick-notes').value = source; $('quick-mode').value = 'csv'; $('quick-table-headers').checked = true;
+    composerMode = 'paste'; pasteReviewOpen = true; persist(); showTab('entry'); renderPasteReview(); chooseComposer('paste');
+  },
+  acceptCrew: reviewMappedMembers,
+  refresh() { const tab = activeTab; fillDay(); showTab(tab, false); },
+  showReport() { showTab('report', false); }
+});
+
 fillDay();

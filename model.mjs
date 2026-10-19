@@ -1,5 +1,6 @@
-import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.3';
-import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.3';
+import { reportTablesFrom } from './table-data.mjs?v=5.4';
+import { escapeHTML, richText, readableText, displayText, teamsDestination } from './links.mjs?v=5.4';
+import { membersFrom, mergeMembers, crewText, readTable, writeTable } from './crew.mjs?v=5.4';
 export { escapeHTML };
 export const STORAGE_KEY = 'eod-work-log:v1';
 export const KINDS = ['Pulling fiber', 'Rolling / bundling', 'Labeling', 'Dressing fiber', 'Rework', 'Testing', 'Housekeeping', 'Custom task'];
@@ -119,13 +120,13 @@ export function validDate(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return !Number.isNaN(parsed.getTime()) && localDate(parsed) === value;
 }
-export function newState() { return { schema: 12, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], previewOpen: true, reportLabels: { ...REPORT_LABELS }, pastePreferences: null, teamsTarget: '', days: {} }; }
+export function newState() { return { schema: 13, defaults: blankHeader(), defaultShiftDuration: '', defaultCrewMembers: [], members: [], shiftPresets: [], categories: [], previewOpen: true, reportLabels: { ...REPORT_LABELS }, pastePreferences: null, teamsTarget: '', days: {} }; }
 export function validShiftId(id, date) { return validDate(date) && (id === date || new RegExp(`^${date}~[a-zA-Z0-9-]{1,100}$`).test(id)); }
 export function ensureDay(state, date, id = date) {
   if (!validDate(date)) throw new Error('Choose a valid date.');
   if (!validShiftId(id, date)) throw new Error('Choose a valid shift.');
   if (!Object.hasOwn(state.days, id)) state.days[id] = {
-    id, date, shiftName: '', entryLogged: date <= localDate(), entryStatus: '', header: { ...state.defaults }, shiftDuration: state.defaultShiftDuration || '', crewMembers: structuredClone(state.defaultCrewMembers || []), tasks: [], undo: null, countBy: 'category', showCounts: true, updateCategoryDraft: 'auto', updateCategoryAuto: true, updateAreaDraft: '', updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
+    id, date, shiftName: '', entryLogged: date <= localDate(), entryStatus: '', header: { ...state.defaults }, shiftDuration: state.defaultShiftDuration || '', crewMembers: structuredClone(state.defaultCrewMembers || []), tasks: [], reportTables: [], undo: null, countBy: 'category', showCounts: true, updateCategoryDraft: 'auto', updateCategoryAuto: true, updateAreaDraft: '', updateTitleDraft: '', updateDescriptionDraft: '', quickDraft: '', pasteReview: null, quickMode: state.pastePreferences?.mode || 'lines', quickTableHeaders: state.pastePreferences?.headers !== false, blockerState: 'Not reviewed', blockers: '', carryover: '', updatedAt: ''
   };
   return state.days[id];
 }
@@ -172,7 +173,7 @@ export function workCsv(tasks) {
 }
 function workCsvRows(source) {
   const rows = readTable(source), headers = rows.shift() || [], names = headers.map(name => name.trim().toLowerCase());
-  const index = { title: names.findIndex(name => ['title', 'ticket', 'work', 'task'].includes(name)), summary: names.findIndex(name => ['description', 'progress', 'summary'].includes(name)), category: names.indexOf('category'), area: names.findIndex(name => ['area', 'row', 'row / area'].includes(name)) };
+  const index = { title: names.findIndex(name => ['title', 'ticket', 'work', 'task'].includes(name)), summary: names.findIndex(name => ['description', 'progress', 'summary'].includes(name)), category: names.indexOf('category'), area: names.findIndex(name => ['area', 'row', 'row / area'].includes(name)), status: names.indexOf('status') };
   if (index.title < 0) throw new Error('Work CSV needs a Title column. Description, Category, and Area are optional.');
   return rows.map((row, number) => {
     if (row.length > headers.length) throw new Error(`CSV row ${number + 2} has extra cells. Check its commas and quotes.`);
@@ -180,7 +181,8 @@ function workCsvRows(source) {
     const title = textField(get('title'), 200).trim();
     if (!title) throw new Error(`Add a title to CSV row ${number + 2}.`);
     const extras = row.map((value, col) => value && !Object.values(index).includes(col) ? `${headers[col]}: ${value}` : '').filter(Boolean);
-    return { title, summary: textField([get('summary'), ...extras].filter(Boolean).join('\n')), category: categoryFrom(get('category')), area: textField(get('area'), 200) };
+    if (get('status') && !STATUSES.includes(get('status'))) throw new Error(`CSV row ${number + 2}: choose In progress, Completed, or Blocked for Status.`);
+    return { title, summary: textField([get('summary'), ...extras].filter(Boolean).join('\n')), category: categoryFrom(get('category')), area: textField(get('area'), 200), ...(index.status < 0 ? {} : { status: get('status') }) };
   });
 }
 export function splitQuickNotes(source, { mode = 'lines', headers = false } = {}) {
@@ -265,20 +267,21 @@ export function applyPasteReview(tasks, rows, { logged = true, status = '', hist
     if (!['add', 'update', 'continue'].includes(row.action)) throw new Error('Choose how to save each matching ticket.');
     if (!row.title.trim()) throw new Error('Add a short title for each included update.');
     const title = row.title.trim(), summary = row.summary.trim();
-    if (row.action === 'add') result.push(validateTask({ ...nextTask(), entryType: 'quick', title, summary, category: row.category || '', area: row.area || '', status, logged }));
+    if (row.status != null && row.status !== '' && !STATUSES.includes(row.status)) throw new Error('Choose a valid imported task status.');
+    if (row.action === 'add') result.push(validateTask({ ...nextTask(), entryType: 'quick', title, summary, category: row.category || '', area: row.area || '', status: row.status || status, logged }));
     else if (row.action === 'continue') {
       const source = history.find(item => item.shift.id === row.sourceShiftId && item.task.id === row.targetId);
       if (!source || !ticketMatches([source.task], row).length) throw new Error('The earlier entry no longer matches this ticket. Review your choice.');
       const original = source.task;
       if (result.some(task => task.workId === original.workId)) throw new Error('This work is already on this shift. Continue it only once per batch, or update its entry.');
-      result.push(validateTask({ ...original, id: crypto.randomUUID(), title, logged, status: status || 'In progress', summary: '', notes: '', quantity: '', breakdown: [], carriedFrom: '', category: row.category ?? original.category, area: row.area ?? original.area, ...(original.entryType === 'quick' ? { summary } : { notes: summary }) }));
+      result.push(validateTask({ ...original, id: crypto.randomUUID(), title, logged, status: row.status || status || 'In progress', summary: '', notes: '', quantity: '', breakdown: [], carriedFrom: '', category: row.category ?? original.category, area: row.area ?? original.area, ...(original.entryType === 'quick' ? { summary } : { notes: summary }) }));
     } else {
       const index = tasks.findIndex(task => task.id === row.targetId);
       if (index < 0 || !ticketMatches(tasks, row).some(task => task.id === row.targetId)) throw new Error('The selected entry no longer matches this ticket. Review your choice.');
       if (updated.has(row.targetId)) throw new Error('Update each existing entry only once per batch. Skip or add the other update separately.');
       updated.add(row.targetId);
       const original = tasks[index];
-      result[index] = validateTask({ ...original, title, logged, category: row.category ?? original.category, area: row.area ?? original.area, ...(original.entryType === 'quick' ? { summary } : { notes: summary }) });
+      result[index] = validateTask({ ...original, title, logged, ...(row.status ? { status: row.status } : {}), category: row.category ?? original.category, area: row.area ?? original.area, ...(original.entryType === 'quick' ? { summary } : { notes: summary }) });
     }
   }
   if (result.length > 1000) throw new Error('Use up to 1,000 entries per day.');
@@ -291,7 +294,7 @@ export function reportWarnings(day) {
   if (!day.header.location.trim()) warnings.push('Add the work location.');
   if (!day.header.supervisor.trim()) warnings.push('Add the supervisor.');
   if (!crewText(day).trim()) warnings.push('Add your crew.');
-  if (!loggedTasks(day).length) warnings.push('Log progress on at least one task. Planned work is excluded.');
+  if (!loggedTasks(day).length && !(day.reportTables || []).some(table => table.include !== false)) warnings.push('Log progress on at least one task. Planned work is excluded.');
   if (day.updateTitleDraft?.trim() || day.updateDescriptionDraft?.trim()) warnings.push('Add your draft update to the log before sharing.');
   if (day.quickDraft?.trim() || day.pasteReview?.rows.length) warnings.push('Add your quick notes to the log before sharing.');
   if (day.blockerState === 'Not reviewed') warnings.push('Review blockers: choose None or Reported.');
@@ -311,7 +314,7 @@ export function reportData(day, { detailed = false, reportLabels } = {}) {
   const production = productionData(tasks, { detailed, reportLabels });
   const blockers = day.blockerState === 'None' ? 'None.' : day.blockerState === 'Reported' ? day.blockers || 'Details not recorded.' : 'Not reviewed.';
   const counts = day.showCounts !== false && tasks.length ? workCounts(tasks, day.countBy) : null;
-  return { heading, header, ...production, workHeading: reportLabelsFrom(reportLabels).section, counts, blockers, carryover: day.carryover.trim() };
+  return { heading, header, ...production, workHeading: reportLabelsFrom(reportLabels).section, reportTables: (day.reportTables || []).filter(table => table.include !== false), counts, blockers, carryover: day.carryover.trim() };
 }
 function productionData(tasks, { detailed = false, columnTasks = tasks, reportLabels } = {}) {
   const hasLocation = columnTasks.some(task => task.area);
@@ -331,15 +334,17 @@ export function renderProductionTables(tasks, options = {}) {
   return taskGroups.map(group => `<h3 style="font-size:15px;margin-top:18px;">${escapeHTML(group.label)} · ${group.tasks.length} ${group.tasks.length === 1 ? 'entry' : 'entries'}</h3>\n${tableHTML(labels, group.rows)}`).join('');
 }
 export function renderReport(day, options = {}) {
-  const { heading, header, labels, taskRows, taskGroups, workHeading, counts, blockers, carryover } = reportData(day, options);
+  const { heading, header, labels, taskRows, taskGroups, workHeading, reportTables, counts, blockers, carryover } = reportData(day, options);
   let index = 0;
   const updates = taskGroups.map(group => `${group.label}\n${group.rows.map(row => {
     index++;
     return `${index}. ${row.map((value, column) => column && value === '—' ? '' : `${labels[column]}:${column && value.includes('\n') ? '\n' : ' '}${value}`).filter(Boolean).join('\n')}`;
   }).join('\n\n')}`);
+  const extraHTML = reportTables.map(table => `<h2 style="font-size:17px;">${escapeHTML(table.title)}</h2><div class="additional-report-table" style="overflow-x:auto;">${tableHTML(table.headers, table.rows).replace('width:100%;', `width:100%;min-width:${Math.max(320, table.headers.length * 110)}px;`)}</div>`).join('');
+  const extraText = reportTables.map(table => `\n\n${table.title.toUpperCase()}\n${table.rows.map(row => row.map((cell, i) => `${table.headers[i]}: ${cell || '—'}`).join('\n')).join('\n\n')}`).join('');
   return {
-    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}${counts ? `<h2 style="font-size:17px;">Work counts</h2><p>${escapeHTML(counts.summary)}</p>${tableHTML(counts.labels, counts.rows)}` : ''}<h2 style="font-size:17px;">${escapeHTML(workHeading)}</h2>\n${taskRows.length ? renderProductionTables(loggedTasks(day), options) : '<p>No tasks recorded.</p>\n'}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
-    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}${counts ? `\n\nWORK COUNTS\n${counts.summary}\nBy ${counts.labels[0].toLowerCase()} (logged entries):\n${counts.rows.map(([label, count]) => `${label}: ${count}`).join('\n')}` : ''}\n\n${workHeading.toUpperCase()}\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
+    html: `<div style="font:14px Arial,sans-serif;color:#16283b;"><h1 style="font-size:22px;">${escapeHTML(heading)}</h1>\n<h2 style="font-size:17px;">Shift details</h2>\n${tableHTML(['Shift details', 'Information'], header)}${counts ? `<h2 style="font-size:17px;">Work counts</h2><p>${escapeHTML(counts.summary)}</p>${tableHTML(counts.labels, counts.rows)}` : ''}${taskRows.length || !reportTables.length ? `<h2 style="font-size:17px;">${escapeHTML(workHeading)}</h2>\n${taskRows.length ? renderProductionTables(loggedTasks(day), options) : '<p>No tasks recorded.</p>\n'}` : ''}${extraHTML}<h2 style="font-size:17px;">Blockers</h2>\n<p>${lines(blockers)}</p>\n${carryover ? `<h2 style="font-size:17px;">Carryover / next shift</h2>\n<p>${lines(carryover)}</p>\n` : ''}</div>`,
+    text: readableText(`${heading}\n\nSHIFT DETAILS\n${header.map(([label, value]) => `${label}: ${value}`).join('\n')}${counts ? `\n\nWORK COUNTS\n${counts.summary}\nBy ${counts.labels[0].toLowerCase()} (logged entries):\n${counts.rows.map(([label, count]) => `${label}: ${count}`).join('\n')}` : ''}${updates.length || !reportTables.length ? `\n\n${workHeading.toUpperCase()}\n${updates.length ? updates.join('\n\n') : 'No tasks recorded.'}` : ''}${extraText}\n\nBLOCKERS\n${blockers}${carryover ? `\n\nCARRYOVER / NEXT SHIFT\n${carryover}` : ''}`)
   };
 }
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -354,8 +359,8 @@ function reviewFrom(value) {
   const shared = value.shared;
   if (shared != null && !isObject(shared)) throw new Error('This backup has invalid shared batch fields.');
   return { source: textField(value.source), mode: value.mode, headers: value.headers, shared: { summary: textField(shared?.summary), category: categoryFrom(shared?.category), area: textField(shared?.area, 200) }, rows: value.rows.map(row => {
-    if (!isObject(row) || !['', 'add', 'skip', 'update', 'continue'].includes(row.action)) throw new Error('This backup has an invalid review choice.');
-    return { title: textField(row.title, 200), summary: textField(row.summary), category: categoryFrom(row.category), area: textField(row.area, 200), action: row.action, targetId: textField(row.targetId, 100), sourceShiftId: textField(row.sourceShiftId, 120) };
+    if (!isObject(row) || !['', 'add', 'skip', 'update', 'continue'].includes(row.action) || row.status != null && row.status !== '' && !STATUSES.includes(row.status)) throw new Error('This backup has an invalid review choice.');
+    return { title: textField(row.title, 200), summary: textField(row.summary), category: categoryFrom(row.category), area: textField(row.area, 200), action: row.action, targetId: textField(row.targetId, 100), sourceShiftId: textField(row.sourceShiftId, 120), ...(row.status == null ? {} : { status: row.status }) };
   }) };
 }
 function headerFrom(value) {
@@ -409,7 +414,7 @@ export function parseBackup(source) {
   if (typeof source !== 'string' || source.length > 5e6) throw new Error('Choose an EOD backup smaller than 5 MB.');
   let raw;
   try { raw = JSON.parse(source); } catch { throw new Error('This file is not a valid JSON backup.'); }
-  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
+  if (!isObject(raw) || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(raw.schema) || !isObject(raw.days) || Object.keys(raw.days).length > 5000) throw new Error('This is not a supported EOD backup.');
   const state = newState();
   state.defaults = headerFrom(raw.defaults);
   state.previewOpen = raw.schema < 12 || raw.previewOpen !== false;
@@ -433,7 +438,7 @@ export function parseBackup(source) {
     if (!isObject(value) || !validShiftId(id, date) || !Array.isArray(value.tasks) || value.tasks.length > 1000 || !['None', 'Reported', 'Not reviewed'].includes(value.blockerState)) throw new Error('This backup contains an invalid day.');
     const tasks = value.tasks.map(validateTask);
     if (new Set(tasks.map(task => task.id)).size !== tasks.length) throw new Error('This backup contains duplicate task IDs.');
-    state.days[id] = { id, date, shiftName: textField(value.shiftName, 80), entryLogged: typeof value.entryLogged === 'boolean' ? value.entryLogged : date <= localDate(), entryStatus: STATUSES.includes(value.entryStatus) ? value.entryStatus : '', header: headerFrom(value.header), tasks, updateTitleDraft: textField(value.updateTitleDraft), updateDescriptionDraft: textField(value.updateDescriptionDraft), quickDraft: textField(value.quickDraft), pasteReview: reviewFrom(value.pasteReview), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
+    state.days[id] = { id, date, shiftName: textField(value.shiftName, 80), entryLogged: typeof value.entryLogged === 'boolean' ? value.entryLogged : date <= localDate(), entryStatus: STATUSES.includes(value.entryStatus) ? value.entryStatus : '', header: headerFrom(value.header), tasks, reportTables: reportTablesFrom(value.reportTables), updateTitleDraft: textField(value.updateTitleDraft), updateDescriptionDraft: textField(value.updateDescriptionDraft), quickDraft: textField(value.quickDraft), pasteReview: reviewFrom(value.pasteReview), quickMode: QUICK_MODES.includes(value.quickMode) ? value.quickMode : 'lines', quickTableHeaders: value.quickTableHeaders !== false, blockerState: value.blockerState, blockers: textField(value.blockers), carryover: textField(value.carryover), updatedAt: textField(value.updatedAt, 100) };
     Object.assign(state.days[id], { shiftDuration: durationFrom(value.shiftDuration), updateCategoryAuto: value.updateCategoryAuto == null ? value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' : value.updateCategoryAuto === true, crewMembers: membersFrom(value.crewMembers, 200), countBy: Object.hasOwn(COUNT_FIELDS, value.countBy) ? value.countBy : 'category', showCounts: value.showCounts !== false, undo: undoFrom(value.undo), updateCategoryDraft: value.updateCategoryDraft == null || value.updateCategoryDraft === 'auto' ? 'auto' : categoryFrom(value.updateCategoryDraft), updateAreaDraft: textField(value.updateAreaDraft, 200) });
   }
   // Old carried entries share a work identity; independent old entries stay independent.
@@ -448,7 +453,7 @@ export function parseBackup(source) {
 }
 export const exportBackup = state => JSON.stringify(state, null, 2);
 export function hasDayContent(day, defaults) {
-  return Boolean(day.updatedAt || day.tasks.length || day.crewMembers?.length || day.shiftDuration || day.updateTitleDraft || day.updateDescriptionDraft || day.quickDraft || day.pasteReview?.rows.length || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
+  return Boolean(day.updatedAt || day.tasks.length || day.reportTables?.length || day.crewMembers?.length || day.shiftDuration || day.updateTitleDraft || day.updateDescriptionDraft || day.quickDraft || day.pasteReview?.rows.length || day.blockers || day.carryover || day.blockerState !== 'Not reviewed' || HEADER_KEYS.some(key => day.header[key] !== defaults[key]));
 }
 export function mergeBackup(current, incoming) {
   const days = { ...incoming.days };
@@ -459,5 +464,5 @@ export function mergeBackup(current, incoming) {
   for (const preset of [...(current.shiftPresets || []), ...(incoming.shiftPresets || [])]) if (!presets.has(preset.name.toLowerCase()) && ![...presets.values()].some(item => item.id === preset.id)) presets.set(preset.name.toLowerCase(), preset);
   if (presets.size > 50) throw new Error('The combined backup has more than 50 shift presets.');
   const currentDefaults = Object.values(current.defaults).some(Boolean);
-  return { schema: 12, previewOpen: current.previewOpen !== false, reportLabels: reportLabelsFrom(Object.entries(REPORT_LABELS).some(([key, value]) => current.reportLabels?.[key] && current.reportLabels[key] !== value) ? current.reportLabels : incoming.reportLabels), defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
+  return { schema: 13, previewOpen: current.previewOpen !== false, reportLabels: reportLabelsFrom(Object.entries(REPORT_LABELS).some(([key, value]) => current.reportLabels?.[key] && current.reportLabels[key] !== value) ? current.reportLabels : incoming.reportLabels), defaults: currentDefaults ? { ...current.defaults } : { ...incoming.defaults }, defaultShiftDuration: (currentDefaults ? current.defaultShiftDuration : incoming.defaultShiftDuration) || '', defaultCrewMembers: structuredClone((currentDefaults ? current.defaultCrewMembers : incoming.defaultCrewMembers) || []), members: mergeMembers(incoming.members || [], current.members || []).members, shiftPresets: [...presets.values()], categories: categoryNames([...(current.categories || []), ...(incoming.categories || [])]), pastePreferences: current.pastePreferences || incoming.pastePreferences || null, teamsTarget: current.teamsTarget || incoming.teamsTarget || '', days };
 }

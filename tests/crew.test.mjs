@@ -74,4 +74,6 @@ test('work CSV preserves multiline progress and custom categories in the normal 
   day.quickMode = 'csv'; day.quickDraft = csv; day.pasteReview = review;
   assert.equal(m.parseBackup(m.exportBackup(state)).days[day.date].pasteReview.rows[0].category, 'Rack audits');
   assert.throws(() => m.createPasteReview([], 'Description\nMissing title', { mode: 'csv' }), /Title column/);
+  const withStatus = m.createPasteReview([], 'Title,Description,Status\nTK421,Checked,Completed', { mode: 'csv', headers: true });
+  assert.equal(m.applyPasteReview([], withStatus.rows)[0].status, 'Completed');
 });

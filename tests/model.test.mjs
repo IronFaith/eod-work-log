@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newState, ensureDay, nextTask, quickTasks, taskName, taskDetails, reportData, renderReport, reportWarnings, exportBackup, parseBackup, mergeBackup, validateTask, hasDayContent } from '../model.mjs';
 
+test('additional report tables retain their columns through backup without inventing task counts', () => {
+  const state = newState(), day = ensureDay(state, '2026-10-19');
+  day.reportTables = [{ id: 'example-table', title: 'Material check', headers: ['Part', 'Available'], rows: [['<Cable>', '12'], ['Connector', '=2+2']], include: true }];
+  const restored = parseBackup(exportBackup(state)).days[day.id];
+  assert.deepEqual(restored.reportTables, day.reportTables);
+  assert.equal(reportData(restored).counts, null);
+  assert.match(renderReport(restored).html, /Material check/);
+  assert.match(renderReport(restored).html, /&lt;Cable&gt;/);
+  assert.match(renderReport(restored).text, /Available: 12/);
+  restored.reportTables[0].include = false;
+  assert.doesNotMatch(renderReport(restored).html, /Material check/);
+});
+
 test('custom report labels survive backup and appear consistently in both report formats', () => {
   const state = newState(), day = ensureDay(state, '2026-10-16');
   state.reportLabels = { section: 'Shift results', update: 'Work item', details: 'Result & next step' };

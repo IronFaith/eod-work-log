@@ -1,5 +1,5 @@
-import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.3';
-import { escapeHTML as esc, displayText } from './links.mjs?v=5.3';
+import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.4';
+import { escapeHTML as esc, displayText } from './links.mjs?v=5.4';
 
 export function setupCrew({ getState, day, persist, toast, showTab, downloadFile, isLibrary = () => false }) {
   const $ = id => document.getElementById(id);
@@ -163,5 +163,8 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     }
     csv(members, `crew-${day().date}.csv`);
   });
-  return { renderRoster, renderShiftCrew };
+  function reviewMappedMembers(members, use = false) {
+    openImport(use); $('crew-import-source').value = crewCsv(members); $('crew-import-format').value = 'table'; previewImport();
+  }
+  return { renderRoster, renderShiftCrew, reviewMappedMembers };
 }

@@ -1,4 +1,4 @@
-import { makeLink, displayText } from './links.mjs?v=5.3';
+import { makeLink, displayText } from './links.mjs?v=5.4';
 
 function field(value, label, limit) {
   if (value == null) return '';

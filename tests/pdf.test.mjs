@@ -22,3 +22,22 @@ test('PDF export produces multiple pages for long mixed work entries', () => {
   assert.ok(output.startsWith('%PDF-'));
   assert.match(output, /\/BaseFont \/NotoSans/);
 });
+
+test('wide imported tables keep every cell within its printed column across pages', () => {
+  const day = sampleDay(), overflow = [], seen = new Map();
+  day.tasks = day.tasks.slice(0,3);
+  day.reportTables = [{ id: 'wide', title: 'Equipment check', headers: ['Asset', ...Array.from({ length: 9 }, (_,i) => `Check ${i+1}`)], rows: Array.from({ length: 12 }, (_,i) => [`Rack ${i+1}`, ...Array.from({ length: 9 }, (_,j) => `Test ${i+1}.${j+1}: verified`)]), include: true }];
+  buildReportPdf(day, { jsPDF, autoTable(doc, settings) {
+    const draw = settings.didDrawCell;
+    return autoTable(doc, { ...settings, didDrawCell(data) {
+      draw?.(data);
+      if (data.section !== 'body' || !/^Test \d+\.\d+: verified$/.test(data.cell.raw.content)) return;
+      const content = data.cell.raw.content;
+      seen.set(content, (seen.get(content) || '') + data.cell.text.join(''));
+      for (const line of data.cell.text) if (doc.getTextWidth(line) > data.cell.width - data.cell.padding('horizontal') + 0.15) overflow.push(data.cell.raw.content);
+    } });
+  } });
+  assert.equal(seen.size,108);
+  for (const [source,printed] of seen) assert.equal(printed.replace(/\s/g,''),source.replace(/\s/g,''));
+  assert.deepEqual(overflow,[]);
+});
