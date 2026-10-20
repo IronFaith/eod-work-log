@@ -1,6 +1,33 @@
-import { memberFrom, writeTable } from './crew.mjs?v=5.4';
-import { validDate, shiftEnd, STATUSES } from './model.mjs?v=5.4';
-import { tableGrid, reportTablesFrom } from './table-data.mjs?v=5.4';
+import { memberFrom, writeTable, readCrewTable, readTable } from './crew.mjs?v=5.5';
+import { validDate, shiftEnd, STATUSES } from './model.mjs?v=5.5';
+import { tableGrid, reportTablesFrom, readPastedTables } from './table-data.mjs?v=5.5';
+import { detectPaste } from './planner.mjs?v=5.5';
+
+export const IMPORT_FORMATS = {
+  tasks: { auto: 'Automatic · table or work list', table: 'Table / spreadsheet cells', tickets: 'Ticket IDs', lines: 'One update per line', blocks: 'Separate by blank lines', single: 'One whole update' },
+  crew: { auto: 'Automatic · table or name list', table: 'Table / spreadsheet cells', names: 'Names · one per line / semicolons', commas: 'Names · separated by commas' },
+  shifts: { table: 'Table / spreadsheet cells' },
+  report: { table: 'Table / spreadsheet cells' }
+};
+
+export function readImportSource(source, { kind = 'tasks', format = 'auto', html = '', doc = globalThis.document } = {}) {
+  if (!IMPORT_FORMATS[kind] || !Object.hasOwn(IMPORT_FORMATS[kind], format)) throw new Error('Choose a supported paste format.');
+  if (typeof source !== 'string' || source.length > 1e6) throw new Error('Import up to 1 MB at a time.');
+  let table = format === 'table';
+  if (format === 'auto') {
+    table = /<table[\s>]/i.test(html) || source.includes('\t') || source.split(/\r?\n/).some(line => /^\s*\|?\s*:?-{3,}/.test(line) && line.includes('|'));
+    if (!table) {
+      try {
+        const grid = readTable(source);
+        table = grid.length > 1 && (kind !== 'crew' && grid[0].length > 1 && grid.every(row => row.length === grid[0].length)
+          || suggestMapping(grid[0], kind).some(field => !['extra','ignore'].includes(field)));
+      } catch { /* Plain notes may contain literal quotes. */ }
+    }
+  }
+  if (table) return { type: 'table', tables: readPastedTables(source, html, doc) };
+  if (kind === 'crew') return { type: 'crew', members: readCrewTable(source, { format: format === 'auto' ? 'names' : format }) };
+  return { type: 'tasks', source, mode: format === 'auto' ? detectPaste(source)?.mode || 'lines' : format, headers: false };
+}
 
 export const IMPORT_FIELDS = {
   tasks: { title: 'Update / task title', ticket: 'Ticket ID', details: 'Details / notes', category: 'Category', area: 'Row / location', status: 'Status', extra: 'Keep in details', ignore: 'Do not import' },

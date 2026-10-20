@@ -1,7 +1,7 @@
-import { createShift, weekDates, availableWork, assignWork, taskTimeline } from './planner.mjs?v=5.4';
-import { localDate, shiftLabel, taskName, taskDetails, replaceTasks, loggedTasks, escapeHTML as esc } from './model.mjs?v=5.4';
-import { displayText, richText } from './links.mjs?v=5.4';
-import { crewText } from './crew.mjs?v=5.4';
+import { createShift, weekDates, availableWork, assignWork, taskTimeline } from './planner.mjs?v=5.5';
+import { localDate, shiftLabel, taskName, taskDetails, replaceTasks, loggedTasks, escapeHTML as esc } from './model.mjs?v=5.5';
+import { displayText, richText } from './links.mjs?v=5.5';
+import { crewText } from './crew.mjs?v=5.5';
 
 export function setupPlanner({ getState, day, getActiveId, chooseShift, persist, toast, renderTasks, showTab }) {
   const $ = id => document.getElementById(id);

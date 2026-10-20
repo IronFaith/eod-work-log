@@ -1,24 +1,32 @@
-import { readPastedTables, reportTablesFrom } from './table-data.mjs?v=5.4';
-import { IMPORT_FIELDS, tableColumns, suggestMapping, mapTable } from './table-import.mjs?v=5.4';
-import { escapeHTML as esc, shiftLabel } from './model.mjs?v=5.4';
-import { createShift } from './planner.mjs?v=5.4';
-import { writeTable } from './crew.mjs?v=5.4';
+import { reportTablesFrom } from './table-data.mjs?v=5.5';
+import { IMPORT_FIELDS, IMPORT_FORMATS, readImportSource, tableColumns, suggestMapping, mapTable } from './table-import.mjs?v=5.5';
+import { escapeHTML as esc, shiftLabel } from './model.mjs?v=5.5';
+import { createShift } from './planner.mjs?v=5.5';
+import { writeTable } from './crew.mjs?v=5.5';
 
-export function setupTableImport({ getState, day, getActiveId, persist, toast, acceptTasks, acceptCrew, refresh, showReport, downloadFile }) {
+export function setupTableImport({ getState, day, getActiveId, persist, toast, acceptTasks, acceptWorkList, acceptCrew, refresh, showReport, downloadFile, isCrewLibrary = () => false, isCrewPicker = () => false }) {
   const $ = id => document.getElementById(id);
   let tables = [], columns = null, mapping = [], selected = new Set(), page = 0, targetId = '', clipboardHTML = '', lastRemoved = null, fileRevision = 0;
   const kind = () => $('table-kind').value;
   const target = () => getState().days[targetId];
   const fail = error => { $('table-error').textContent = error.message; $('table-error').hidden = false; };
+  function sourceOptions() {
+    $('crew-template').hidden = kind() !== 'crew';
+    $('table-source-format').innerHTML = Object.entries(IMPORT_FORMATS[kind()]).map(([value,label]) => `<option value="${value}">${label}</option>`).join('');
+    $('table-source-help').textContent = kind() === 'tasks' ? 'Paste Excel cells, a ticket list, or one update per line. Review before saving.' : kind() === 'crew' ? 'Paste a table or a list of names. The review checks saved members and duplicates.' : 'Paste a table, match its columns, and choose the rows to keep.';
+    $('table-crew-options').hidden = kind() !== 'crew' || isCrewLibrary();
+  }
   function open(type = 'tasks', useCrew = false) {
     targetId = getActiveId(); tables = []; columns = null; clipboardHTML = ''; fileRevision++;
-    $('table-source').value = ''; $('table-source').placeholder = 'Copy a range in Excel, then paste here. CSV, tab-separated cells, web tables, and Markdown tables work too.'; $('table-file').value = ''; $('table-kind').value = type;
-    $('table-crew-use').checked = useCrew; $('table-headers').checked = true; $('table-report-title').value = '';
+    $('table-source').value = ''; $('table-source').placeholder = 'Paste copied cells or a list here.'; $('table-file').value = ''; $('table-kind').value = type;
+    $('table-crew-use').checked = !isCrewLibrary() && (useCrew || isCrewPicker()); $('table-headers').checked = true; $('table-report-title').value = '';
+    sourceOptions();
     $('table-paste-step').hidden = false; $('table-map-step').hidden = true; $('table-error').hidden = true;
     $('table-scope').textContent = `Selected shift: ${day().date} · ${day().shiftName || 'My shift'}`;
+    if ($('report-options-dialog').open) $('report-options-dialog').close();
     $('table-import-dialog').showModal(); $('table-source').focus();
   }
-  document.querySelectorAll('[data-import-table]').forEach(button => button.addEventListener('click', () => open(button.dataset.importTable || 'tasks', button.dataset.crewUse === 'true')));
+  document.querySelectorAll('[data-import-table]').forEach(button => button.addEventListener('click', () => { button.closest('details.inline-options')?.removeAttribute('open'); open(button.dataset.importTable || 'tasks', button.dataset.crewUse === 'true'); }));
   $('table-close').addEventListener('click', () => { fileRevision++; $('table-import-dialog').close(); });
   $('table-source').addEventListener('paste', event => {
     const html = event.clipboardData?.getData('text/html') || '', text = event.clipboardData?.getData('text/plain') || '';
@@ -32,6 +40,7 @@ export function setupTableImport({ getState, day, getActiveId, persist, toast, a
       if (file.size > 1e6) throw new Error('Choose a file smaller than 1 MB.');
       const text = await file.text(); if (revision !== fileRevision) return;
       clipboardHTML = ''; $('table-source').value = text; $('table-error').hidden = true;
+      if (/\.(csv|tsv)$/i.test(file.name)) $('table-source-format').value = 'table';
     } catch (error) { if (revision === fileRevision) fail(error); }
   });
   function chooseTable() {
@@ -44,17 +53,21 @@ export function setupTableImport({ getState, day, getActiveId, persist, toast, a
   }
   $('table-read').addEventListener('click', () => {
     try {
-      tables = readPastedTables($('table-source').value, clipboardHTML);
+      if (getActiveId() !== targetId || !target()) throw new Error('The selected shift changed. Close Import and open it from the correct shift.');
+      const input = readImportSource($('table-source').value, { kind: kind(), format: $('table-source-format').value, html: clipboardHTML });
+      if (input.type === 'tasks') { acceptWorkList(input.source, { mode: input.mode, headers: input.headers }); $('table-import-dialog').close(); return; }
+      if (input.type === 'crew') { $('table-import-dialog').close(); acceptCrew(input.members, $('table-crew-use').checked); return; }
+      tables = input.tables;
       $('table-number').innerHTML = tables.map((table, i) => `<option value="${i}">${esc(table.name)} · ${table.rows.length} rows</option>`).join('');
       $('table-number-label').hidden = tables.length < 2;
       $('table-paste-step').hidden = true; $('table-map-step').hidden = false; chooseTable();
     } catch (error) { fail(error); }
   });
-  $('table-back').addEventListener('click', () => { $('table-paste-step').hidden = false; $('table-map-step').hidden = true; $('table-error').hidden = true; });
+  $('table-back').addEventListener('click', () => { columns = null; $('table-paste-step').hidden = false; $('table-map-step').hidden = true; $('table-error').hidden = true; });
   for (const id of ['table-number','table-headers']) $(id).addEventListener('change', chooseTable);
-  $('table-kind').addEventListener('change', () => { if (columns) { mapping = suggestMapping(columns.headers, kind()); renderMapping(); } });
+  $('table-kind').addEventListener('change', () => { sourceOptions(); if (columns) { mapping = suggestMapping(columns.headers, kind()); renderMapping(); } });
   function renderMapping() {
-    $('table-crew-options').hidden = kind() !== 'crew'; $('table-shift-options').hidden = kind() !== 'shifts'; $('table-report-options').hidden = kind() !== 'report';
+    $('table-crew-options').hidden = kind() !== 'crew' || isCrewLibrary(); $('table-shift-options').hidden = kind() !== 'shifts'; $('table-report-options').hidden = kind() !== 'report';
     $('table-mapping').innerHTML = columns.headers.map((header, index) => `<label class="table-column"><span>${esc(header)}</span><select data-map-column="${index}" aria-label="Use column ${index + 1}: ${esc(header)}">${Object.entries(IMPORT_FIELDS[kind()]).map(([value,label]) => `<option value="${value}"${mapping[index] === value ? ' selected' : ''}>${label}</option>`).join('')}</select>${kind() === 'report' ? `<input data-table-heading="${index}" maxlength="120" value="${esc(header)}" aria-label="Heading for column ${index + 1}">` : ''}</label>`).join('');
     renderPreview();
   }

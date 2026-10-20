@@ -1,0 +1,69 @@
+/* Keep the daily path clear: shift, work, report. */
+.day-heading{margin-bottom:20px}
+.day-heading .eyebrow{display:none}
+.workspace-context{padding-bottom:14px;margin-bottom:20px}
+.workspace-context .scope-label{display:none}
+.shift-overview{padding:20px 24px;gap:16px}
+.shift-overview h2{font-size:20px}
+.shift-overview .eyebrow{display:none}
+#shift-overview-crew{max-width:680px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.work-home-top{padding-top:18px}
+.work-home-top .copy-actions{gap:10px}
+.organize-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-top:10px}
+.entry-actions{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}
+.entry-actions>.copy-actions{flex-shrink:0;gap:18px}
+.entry-actions .text-button{padding:8px 0}
+.entry-more>summary .optional{font-size:12px}
+.composer-switch>button[data-composer="single"]{display:inline-flex!important}
+.composer-switch:has([data-composer="single"][aria-pressed="true"])>button[data-composer="single"]{display:none!important}
+.preset-options{margin:0 0 18px;border-top:0}
+.preset-options>summary{padding-top:0}
+.preset-options .preset-picker{padding-bottom:14px}
+.shift-crew-card .copy-actions{margin-top:14px}
+.crew-actions{gap:12px}
+.screen-actions .inline-options>summary,.schedule-toolbar .inline-options>summary{white-space:nowrap}
+.report-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}
+.report-toolbar h2{font-size:18px}
+.report-toolbar p{margin-top:4px}
+.report-share-bar{margin:18px 0}
+.report-share-bar .pdf-share-card{margin:0;padding:18px 22px;background:var(--paper)}
+.report-share-bar .copy-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.pdf-instructions{margin-top:12px;font-size:12px;color:var(--muted)}
+.pdf-instructions>summary{cursor:pointer}
+#report-panel>.report-blockers{border-top:1px solid var(--line);margin-top:18px}
+#report-options-dialog{width:min(620px,calc(100vw - 24px));max-height:90dvh;overflow-y:auto}
+#report-options-dialog .dialog-body{padding:22px}
+#report-options-dialog .secondary-options{margin-top:12px}
+.report-format-settings .check-label{margin:16px 0 8px}
+.report-format-settings .text-button{padding-left:0}
+#report-options-dialog .teams-shortcut{margin-top:16px}
+#report-options-dialog .stack-actions{justify-items:start}
+#table-source-format{margin-bottom:14px}
+#crew-import-inputs>summary{font-size:12px}
+#crew-import-inputs[open]{padding-bottom:16px}
+#crew-import-preview{margin-top:18px}
+@media(min-width:960px){
+  #report-panel{max-width:960px;margin:auto}
+  .report-share-bar .pdf-share-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 24px}
+  .report-share-bar .copy-actions{margin:0}
+  .report-share-bar .pdf-instructions,.report-share-bar #share-status{grid-column:1/-1}
+}
+@media(max-width:700px){
+  .day-heading{margin-bottom:16px}
+  .shift-overview{padding:18px;gap:8px}
+  .shift-overview>div:last-child{justify-content:space-between}
+  .entry-actions{align-items:start;gap:8px;flex-direction:column}
+  .entry-actions>.copy-actions{width:100%;justify-content:flex-end}
+  .entry-actions>p{font-size:12px}
+  .organize-heading{align-items:start;flex-wrap:wrap}
+  .report-toolbar p{display:none}
+  .report-share-bar .pdf-share-card{padding:16px}
+  .report-share-bar .copy-actions{display:flex}
+  .report-share-bar .copy-actions>.button{flex:1 1 auto;font-size:13px;min-height:44px}
+  .report-share-bar .pdf-icon{display:none}
+  .schedule-toolbar .copy-actions{gap:6px}
+  .schedule-toolbar .inline-options>summary{font-size:12px;padding:10px 6px}
+  .inline-options>.stack-actions{width:220px}
+  .entry-save{position:sticky;bottom:80px;background:var(--paper);padding:10px 0;margin-bottom:-8px;z-index:2}
+}
+@media print{.report-toolbar,.report-share-bar{display:none}}

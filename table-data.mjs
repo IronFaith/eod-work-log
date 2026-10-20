@@ -1,4 +1,4 @@
-import { readTable } from './crew.mjs?v=5.4';
+import { readTable } from './crew.mjs?v=5.5';
 
 export function tableGrid(rows) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 1001) throw new Error('Use a table with up to 1,000 data rows.');

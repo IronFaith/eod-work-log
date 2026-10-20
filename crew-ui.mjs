@@ -1,5 +1,5 @@
-import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.4';
-import { escapeHTML as esc, displayText } from './links.mjs?v=5.4';
+import { memberFrom, sameMember, mergeMembers, readCrewTable, crewCsv } from './crew.mjs?v=5.5';
+import { escapeHTML as esc, displayText } from './links.mjs?v=5.5';
 
 export function setupCrew({ getState, day, persist, toast, showTab, downloadFile, isLibrary = () => false }) {
   const $ = id => document.getElementById(id);
@@ -16,7 +16,8 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     const library = isLibrary();
     $('crew-heading').textContent = library ? 'Saved members' : 'Members for this shift';
     $('crew-help').textContent = library ? 'Add, edit, or import reusable members. This screen does not change a shift’s crew.' : 'Check the members working this shift. Your selections save immediately.';
-    $('crew-done').textContent = library ? 'Done · Manage' : 'Done · Shift & crew';
+    $('crew-done').textContent = library ? 'Done · Tools' : 'Done · Shift & crew';
+    $('import-roster').dataset.crewUse = String(!library);
     $('manage-crew-library').hidden = library;
     $('undo-member-remove').hidden = !library || !removed;
     const state = getState(), group = $('roster-group').value, query = $('roster-search').value.trim().toLowerCase();
@@ -47,12 +48,13 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     $('member-dialog').showModal(); $('member-name').focus();
   }
   function openImport(use) {
-    importRows = []; $('crew-import-source').value = ''; $('crew-import-file').value = '';
+    importRows = []; $('crew-import-source').value = '';
     $('crew-import-format').value = 'auto';
     $('crew-import-preview').hidden = true; $('crew-import-error').textContent = ''; $('crew-import-use').checked = use && !isLibrary();
     $('crew-import-use').closest('label').hidden = isLibrary();
-    $('crew-import-title').textContent = isLibrary() ? 'Add to crew library' : 'Paste crew / import';
-    $('crew-import-dialog').showModal(); $('crew-import-source').focus();
+    $('crew-import-title').textContent = isLibrary() ? 'Review library members' : 'Review crew members';
+    $('crew-import-inputs').open = false;
+    $('crew-import-dialog').showModal();
   }
   function previewImport() {
     try {
@@ -121,19 +123,9 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     day().crewMembers = day().crewMembers.filter(member => member.id !== button.dataset.removeCrew);
     persist(); renderShiftCrew();
   });
-  $('import-shift-crew').addEventListener('click', () => openImport(true));
-  $('import-roster').addEventListener('click', () => openImport(false));
   $('close-crew-import').addEventListener('click', () => $('crew-import-dialog').close());
   $('crew-import-source').addEventListener('input', () => { importRows = []; $('crew-import-preview').hidden = true; });
   $('crew-import-format').addEventListener('change', () => { importRows = []; $('crew-import-preview').hidden = true; });
-  $('crew-import-file').addEventListener('change', async event => {
-    const file = event.target.files[0]; if (!file) return;
-    try {
-      if (file.size > 1e6) throw new Error('Choose a CSV smaller than 1 MB.');
-      if (!/\.(csv|tsv|txt)$/i.test(file.name)) throw new Error('In Excel, save the file as CSV UTF-8, then import that CSV.');
-      $('crew-import-source').value = await file.text(); $('crew-import-format').value = /\.txt$/i.test(file.name) ? 'auto' : 'table'; previewImport();
-    } catch (error) { importRows = []; $('crew-import-preview').hidden = true; $('crew-import-error').textContent = error.message; }
-  });
   $('crew-import-review').addEventListener('click', previewImport);
   $('crew-import-list').addEventListener('change', updateImportCount);
   $('crew-import-save').addEventListener('click', () => {
@@ -164,7 +156,8 @@ export function setupCrew({ getState, day, persist, toast, showTab, downloadFile
     csv(members, `crew-${day().date}.csv`);
   });
   function reviewMappedMembers(members, use = false) {
-    openImport(use); $('crew-import-source').value = crewCsv(members); $('crew-import-format').value = 'table'; previewImport();
+    openImport(use); $('crew-import-source').value = crewCsv(members); $('crew-import-format').value = 'auto'; previewImport();
+    $('crew-import-list').querySelector('input')?.focus();
   }
   return { renderRoster, renderShiftCrew, reviewMappedMembers };
 }

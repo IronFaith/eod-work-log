@@ -1,4 +1,4 @@
-import { ensureDay, localDate, validDate, validateTask, splitQuickNotes } from './model.mjs?v=5.4';
+import { ensureDay, localDate, validDate, validateTask, splitQuickNotes } from './model.mjs?v=5.5';
 
 // One latest snapshot per work item, only from shifts before the selected shift.
 export function ticketHistory(state, targetId) {

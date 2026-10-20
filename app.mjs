@@ -1,18 +1,18 @@
-import { setupTableImport } from './table-ui.mjs?v=5.4';
-import { mappedTaskCsv } from './table-import.mjs?v=5.4';
-import { setupPlanner } from './planner-ui.mjs?v=5.4';
-import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.4';
-import { loggedTasks } from './model.mjs?v=5.4';
-import { setupCrew } from './crew-ui.mjs?v=5.4';
-import { crewText } from './crew.mjs?v=5.4';
-import { workCsv } from './model.mjs?v=5.4';
-import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.4';
-import { buildReportPdf } from './pdf.mjs?v=5.4';
-import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.4';
-import { previewDraft } from './preview.mjs?v=5.4';
-import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.4';
-import { refreshFormatting, sourceField } from './editor.mjs?v=5.4';
-import { REPORT_LABELS, reportLabelsFrom, updateFields } from './model.mjs?v=5.4';
+import { setupTableImport } from './table-ui.mjs?v=5.5';
+import { mappedTaskCsv } from './table-import.mjs?v=5.5';
+import { setupPlanner } from './planner-ui.mjs?v=5.5';
+import { availableWork, detectPaste, ticketHistory } from './planner.mjs?v=5.5';
+import { loggedTasks } from './model.mjs?v=5.5';
+import { setupCrew } from './crew-ui.mjs?v=5.5';
+import { crewText } from './crew.mjs?v=5.5';
+import { workCsv } from './model.mjs?v=5.5';
+import { STORAGE_KEY, KINDS, UNITS, STATUSES, localDate, newState, ensureDay, nextTask, escapeHTML as esc, taskName, taskDetails, taskSummary, splitQuickNotes, createPasteReview, ticketMatches, applyPasteReview, reportWarnings, renderReport, validateTask, parseBackup, exportBackup, mergeBackup, hasDayContent } from './model.mjs?v=5.5';
+import { buildReportPdf } from './pdf.mjs?v=5.5';
+import { CATEGORIES, suggestCategory, groupTasks, replaceTasks, undoTasks, renderProductionTables, fillPasteReview, workCounts, categoryNames, filterTasks, shiftEnd, shiftPreset, shiftLabel } from './model.mjs?v=5.5';
+import { previewDraft } from './preview.mjs?v=5.5';
+import { richText, displayText, makeLink, teamsDestination } from './links.mjs?v=5.5';
+import { refreshFormatting, sourceField } from './editor.mjs?v=5.5';
+import { REPORT_LABELS, reportLabelsFrom, updateFields } from './model.mjs?v=5.5';
 
 const $ = id => document.getElementById(id);
 let state = newState(), storageLocked = false, activeDate = localDate(), activeShiftId = activeDate, activeTab = 'today', editingTask = null, toastTimer, pdfExporting = false;
@@ -57,7 +57,7 @@ function persist(markDay = true) {
   } catch {
     $('save-state').textContent = 'Not saved — export backup';
     $('save-state').classList.add('failed');
-    $('storage-warning').textContent = 'This browser could not save your latest changes. Keep this page open and use Manage → Export backup to keep a copy.';
+    $('storage-warning').textContent = 'This browser could not save your latest changes. Keep this page open and use Tools → Export backup to keep a copy.';
     $('storage-warning').hidden = false;
     return false;
   }
@@ -79,7 +79,7 @@ function summary() {
 function renderHeader() {
   $('report-date').value = activeDate;
   $('date-caption').textContent = activeTab === 'schedule' ? 'Plan the crew and work. Open a shift to log progress.' : dateLabel(activeDate);
-  const titles = { report: 'Your EOD report', history: 'Manage', shift: 'Shift & crew', crew: crewMode === 'library' ? 'Crew library' : 'Choose crew', templates: 'Presets & defaults', entry: 'Add update', schedule: 'Schedule', today: 'My shift' };
+  const titles = { report: 'Your EOD report', history: 'Tools', shift: 'Shift & crew', crew: crewMode === 'library' ? 'Crew library' : 'Choose crew', templates: 'Presets & defaults', entry: 'Add work', schedule: 'Schedule', today: 'My shift' };
   $('page-title').textContent = titles[activeTab] || 'My shift';
   $('day-eyebrow').textContent = activeTab === 'schedule' ? 'Your work week' : activeTab === 'history' ? 'Workspace tools' : 'EOD · Shift planner';
   document.querySelector('.date-control').hidden = !['today', 'schedule'].includes(activeTab);
@@ -94,7 +94,7 @@ function returnTab() {
   return 'today';
 }
 function renderWorkspaceContext() {
-  const labels = { today: 'My shift', history: 'Manage', shift: 'Shift & crew', report: 'Report' };
+  const labels = { today: 'My shift', history: 'Tools', shift: 'Shift & crew', report: 'Report' };
   $('workspace-context').hidden = ['today', 'schedule'].includes(activeTab);
   $('workspace-back').textContent = `← ${labels[returnTab()] || 'My shift'}`;
   $('shift-done').textContent = `Done · ${labels[shiftReturn] || 'My shift'}`;
@@ -161,7 +161,6 @@ function syncComposer() {
   $('single-draft-badge').hidden = !day().updateTitleDraft.trim() && !day().updateDescriptionDraft.trim();
   $('paste-draft-badge').hidden = !day().quickDraft.trim() && !day().pasteReview?.rows.length;
   $('resume-draft').hidden = $('single-draft-badge').hidden && $('paste-draft-badge').hidden;
-  $('entry-import').textContent = composerMode === 'paste' ? 'Back to single entry' : 'Import CSV / paste options';
 }
 function chooseComposer(mode, focus = true) {
   composerMode = mode;
@@ -188,7 +187,7 @@ function renderTasks() {
     const selection = `<label class="check-label task-selection"><input type="checkbox" data-select-id="${esc(task.id)}" aria-label="Select entry ${number}: ${esc(displayText(taskName(task)))}"${selectedTasks.has(task.id) ? ' checked' : ''}></label>`;
     const actions = `<div class="task-actions"><button class="text-button" data-action="history" data-id="${esc(task.id)}">History / continue</button>${task.entryType === 'quick' ? `<button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}${task.entryType !== 'quick' ? `<button class="text-button" data-action="details" data-id="${esc(task.id)}">Full details</button><button class="text-button" data-action="next" data-id="${esc(task.id)}">${task.entryType === 'field' ? 'Next row' : 'Next entry'}</button><button class="text-button" data-action="complete" data-id="${esc(task.id)}">${task.status === 'Completed' ? 'Reopen' : 'Mark complete'}</button>` : ''}<button class="text-button danger-text delete" data-action="delete" data-id="${esc(task.id)}" aria-label="Delete entry ${number}">Delete</button></div>`;
     return `<article class="task-card compact-task ${statusClass}"><div class="work-list-row">${selection}<button class="work-title" data-action="expand" data-id="${esc(task.id)}" aria-expanded="${expandedTasks.has(task.id)}" aria-label="View entry ${number}: ${esc(displayText(taskName(task)))}">${esc(displayText(taskName(task)))}</button><span class="work-category" data-label="Category">${esc(task.category || 'Uncategorized')}</span><span class="work-area" data-label="Row / area">${esc(task.area || '—')}</span><span class="work-status" data-label="Status">${esc(task.logged === false ? 'Planned' : task.status || 'Logged')}</span><button class="text-button" data-action="${task.logged === false ? 'progress' : 'edit'}" data-id="${esc(task.id)}" aria-label="${task.logged === false ? 'Log progress for' : 'Edit'} entry ${number}">${task.logged === false ? 'Log update' : 'Edit update'}</button></div>${draft ? inlineEditor(task, draft, number) : expandedTasks.has(task.id) ? `<div class="task-content"><p class="task-kind">${esc(context)}</p><h3>${richText(taskName(task))}</h3>${taskDetails(task) ? `<p class="task-details">${richText(taskDetails(task))}</p>` : '<p class="small muted">No description added.</p>'}</div>${actions}` : ''}</article>`;
-  }).join('')}`).join('') || `<div class="empty-state"><p>${tasks.length ? 'No entries match. Clear the filters to see all work.' : 'Your work will appear here. Use Add update to get started.'}</p></div>`;
+  }).join('')}`).join('') || `<div class="empty-state"><p>${tasks.length ? 'No entries match. Clear the filters to see all work.' : 'Your work will appear here. Use Add work to get started.'}</p></div>`;
   $('undo-log').disabled = !day().undo;
   $('undo-log').title = day().undo ? `Undo: ${day().undo.label}` : 'No log change to undo';
   updateSelection();
@@ -1052,20 +1051,6 @@ $('manage-crew-library').addEventListener('click', () => { crewMode = 'library';
 $('export-work-csv').addEventListener('click', () => {
   downloadFile(workCsv(loggedTasks(day())), reportFilename().replace(/^EOD-/, 'work-').replace(/\.pdf$/, '.csv'), 'text/csv;charset=utf-8');
 });
-$('work-csv-file').addEventListener('change', async event => {
-  const file = event.target.files[0]; if (!file) return;
-  try {
-    if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Save or clear your current pasted draft before importing a work CSV.');
-    if (file.size > 12000) throw new Error('Import up to 12,000 characters at a time. Split larger work lists into smaller CSV files.');
-    const source = await file.text();
-    const review = createPasteReview(day().tasks, source, reviewOptions({ mode: 'csv', headers: true }));
-    day().quickDraft = source; day().quickMode = 'csv'; day().quickTableHeaders = true; day().pasteReview = review;
-    $('quick-notes').value = source; $('quick-mode').value = 'csv'; $('quick-table-headers').checked = true;
-    composerMode = 'paste'; pasteReviewOpen = true; previewContext = { kind: 'review' };
-    persist(); renderPasteReview(); updateQuickButton(); renderLivePreview();
-  } catch (error) { $('quick-error').textContent = error.message; $('quick-error').hidden = false; }
-  event.target.value = '';
-});
 const planner = setupPlanner({ getState: () => state, day, getActiveId: () => activeShiftId, chooseShift, persist, toast, renderTasks, showTab });
 $('same-day-shift').addEventListener('change', event => chooseShift(event.target.value));
 $('shift-name').addEventListener('input', event => { day().shiftName = event.target.value; persist(); summary(); });
@@ -1095,7 +1080,6 @@ function reviewPrimaryPaste(grouping) {
   composerMode = 'paste'; pasteReviewOpen = true; previewContext = { kind: 'review' };
   persist(); renderPasteReview(); updateQuickButton(); chooseComposer('paste');
 }
-$('entry-import').addEventListener('click', () => chooseComposer(composerMode === 'paste' ? 'single' : 'paste'));
 $('split-updates').addEventListener('click', () => {
   try { reviewPrimaryPaste({ mode: 'lines', headers: false }); }
   catch (error) { $('update-error').textContent = error.message; $('update-error').hidden = false; }
@@ -1126,17 +1110,24 @@ $('preset-library').addEventListener('click', event => {
   $('shift-preset').value = button.dataset.usePreset; $('apply-shift-preset').disabled = false;
   $('apply-shift-preset').click(); showTab('shift');
 });
+function reviewImportedWork(source, { mode = 'csv', headers = true } = {}) {
+  if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Finish the saved list in Add work before importing another list.');
+  if (source.length > 12000) throw new Error('This work list exceeds 12,000 characters. Import fewer rows at a time.');
+  const review = createPasteReview(day().tasks, source, reviewOptions({ mode, headers }));
+  day().quickDraft = source; day().quickMode = mode; day().quickTableHeaders = headers; day().pasteReview = review;
+  $('quick-notes').value = source; $('quick-mode').value = mode; $('quick-table-headers').checked = headers;
+  composerMode = 'paste'; pasteReviewOpen = true; persist(); showTab('entry'); renderPasteReview(); chooseComposer('paste');
+}
+$('open-report-options').addEventListener('click', () => $('report-options-dialog').showModal());
+$('report-options-dialog').addEventListener('click', event => {
+  if (event.target.closest('#copy-plain, #copy-table, #select-report')) $('report-options-dialog').close();
+}, true);
 const tableImporter = setupTableImport({ getState: () => state, day, getActiveId: () => activeShiftId, persist, toast, downloadFile,
-  acceptTasks(rows) {
-    if (day().quickDraft.trim() || day().pasteReview?.rows.length) throw new Error('Finish the saved list in Add update first. Your table stays here until then.');
-    const source = mappedTaskCsv(rows);
-    if (source.length > 12000) throw new Error('This task list exceeds 12,000 characters. Select fewer rows and import the rest in another batch.');
-    const review = createPasteReview(day().tasks, source, reviewOptions({ mode: 'csv', headers: true }));
-    day().quickDraft = source; day().quickMode = 'csv'; day().quickTableHeaders = true; day().pasteReview = review;
-    $('quick-notes').value = source; $('quick-mode').value = 'csv'; $('quick-table-headers').checked = true;
-    composerMode = 'paste'; pasteReviewOpen = true; persist(); showTab('entry'); renderPasteReview(); chooseComposer('paste');
-  },
+  acceptTasks(rows) { reviewImportedWork(mappedTaskCsv(rows)); },
+  acceptWorkList: reviewImportedWork,
   acceptCrew: reviewMappedMembers,
+  isCrewLibrary: () => activeTab === 'crew' && crewMode === 'library',
+  isCrewPicker: () => activeTab === 'crew' && crewMode === 'pick',
   refresh() { const tab = activeTab; fillDay(); showTab(tab, false); },
   showReport() { showTab('report', false); }
 });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readPastedTables } from '../table-data.mjs';
-import { tableColumns, suggestMapping, mapTable, mappedTaskCsv } from '../table-import.mjs';
+import { tableColumns, suggestMapping, mapTable, mappedTaskCsv, readImportSource } from '../table-import.mjs';
 import { newState, ensureDay, createPasteReview, applyPasteReview, parseBackup, exportBackup } from '../model.mjs';
 
 test('table mapping preserves quoted notes, extra columns and task status through the normal review', () => {
@@ -32,4 +32,27 @@ test('crew and shift mappings handle separate names, overnight times and explici
   assert.equal(mapTable(shifts,mapping,'shifts',{dateOrder:'mdy'})[0].date,'2026-01-11');
   shifts.rows[0][0] = '31/11/2026'; assert.throws(() => mapTable(shifts,mapping,'shifts',{dateOrder:'dmy'}),/date/);
   people.rows[0][2] = 'bad email'; assert.throws(() => mapTable(people,suggestMapping(people.headers,'crew'),'crew'),/email/);
+});
+
+test('one work importer routes tables and lists into the existing review without changing plain notes', () => {
+  for (const source of ['Title,Notes\nInspect cable,Stable', 'Title\tNotes\nInspect cable\tStable', '| Title | Notes |\n| --- | --- |\n| Inspect cable | Stable |']) {
+    const input = readImportSource(source);
+    assert.equal(input.type,'table');
+    assert.deepEqual(input.tables[0].rows,[['Title','Notes'],['Inspect cable','Stable']]);
+  }
+  const input = readImportSource('TK501 TK502');
+  const review = createPasteReview([], input.source, {mode: input.mode, headers: input.headers});
+  assert.deepEqual(applyPasteReview([],review.rows).map(task=>task.title),['TK501','TK502']);
+  const note = readImportSource('Inspected rack\nLabelled both ends', {format:'single'});
+  assert.equal(createPasteReview([],note.source,{mode:note.mode}).rows.length,1);
+  assert.equal(readImportSource('Inspect rack\nLabel both ends').mode,'lines');
+});
+
+test('crew import keeps comma-containing names intact and allows explicit comma lists or custom tables', () => {
+  const input = readImportSource('Crew:\n• Rivera, Alex\n• Lee, Sam', {kind:'crew'});
+  assert.deepEqual(input.members.map(member=>member.name),['Rivera, Alex','Lee, Sam']);
+  assert.deepEqual(readImportSource('Alex Rivera, Sam Lee',{kind:'crew',format:'commas'}).members.map(member=>member.name),['Alex Rivera','Sam Lee']);
+  assert.equal(readImportSource('First_Name\tLast_Name\nAlex\tRivera',{kind:'crew'}).type,'table');
+  const table = readImportSource('Person,Department\nAlex,Nights',{kind:'crew',format:'table'});
+  assert.deepEqual(table.tables[0].rows,[['Person','Department'],['Alex','Nights']]);
 });
